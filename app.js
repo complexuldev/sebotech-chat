@@ -1,6 +1,6 @@
 // SeboTECH CHAT – app UI. All user text is rendered with textContent (no HTML injection).
 import * as D from "./data.js";
-import { OWNER_EMAIL } from "./config.js";
+import { OWNER_EMAIL, KLIPY_KEY } from "./config.js";
 
 const EMOJIS = ["🦙","🪂","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
 const COLORS = ["#00e5ff","#a855f7","#ff4d6d","#ffd23f","#3ef08a","#ff9f43","#5b6cff","#ff6ad5","#ffffff"];
@@ -164,7 +164,7 @@ $("gateForm").addEventListener("submit", async ev => {
     startApp();
   } catch(e){
     err.textContent = D.errCode(e) === "permission-denied" ? "Cheia nu merge sau a fost deja folosită. Fiecare cheie merge o singură dată." : "Ceva n-a mers (" + D.errCode(e) + "). Încearcă din nou.";
-    btn.disabled = false; btn.textContent = "Intră în SeboTECH CHAT 🚀";
+    btn.disabled = false; btn.textContent = "Intră";
   }
 });
 
@@ -254,21 +254,33 @@ function bindUi(){
     typingOff = setTimeout(() => { if (typingNow){ typingNow = false; D.setPresence(false).catch(()=>{}); } }, 4000);
   });
   ci.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
+  const chatAtt = attachBox("chat");
+  ci.addEventListener("paste", e => { const f = [...(e.clipboardData && e.clipboardData.files || [])].find(f => f.type.startsWith("image/")); if (f){ e.preventDefault(); chatAtt.useFile(f); } });
+  const box = document.querySelector(".chatbox");
+  box.addEventListener("dragover", e => { e.preventDefault(); box.classList.add("drop"); });
+  box.addEventListener("dragleave", () => box.classList.remove("drop"));
+  box.addEventListener("drop", e => { e.preventDefault(); box.classList.remove("drop"); const f = e.dataTransfer.files[0]; if (f) chatAtt.useFile(f); });
+  let sending = false;
   $("chatForm").addEventListener("submit", async ev => {
     ev.preventDefault();
-    const text = ci.value.trim(); if (!text) return;
+    if (sending) return;
+    const text = ci.value.trim(), att = chatAtt.get(); if (!text && !att) return;
+    sending = true; $("chatBtn").disabled = true;
     ci.value = ""; ci.style.height = "auto";
     if (typingNow){ typingNow = false; clearTimeout(typingOff); D.setPresence(false).catch(()=>{}); }
-    try { await D.sendChat(text.slice(0,1000)); scrollChat(true); }
+    try { await D.sendChat(text.slice(0,1000), att); chatAtt.clear(); scrollChat(true); }
     catch(e){ ci.value = text; writeErr(e); }
+    finally { sending = false; $("chatBtn").disabled = false; }
   });
 
   $("postIn").addEventListener("input", () => { const n = $("postIn").value.length; $("postCount").textContent = n ? n + "/1200" : ""; });
+  const postAtt = attachBox("post");
+  $("postIn").addEventListener("paste", e => { const f = [...(e.clipboardData && e.clipboardData.files || [])].find(f => f.type.startsWith("image/")); if (f){ e.preventDefault(); postAtt.useFile(f); } });
   $("postForm").addEventListener("submit", async ev => {
     ev.preventDefault();
-    const text = $("postIn").value.trim(); if (!text) return;
+    const text = $("postIn").value.trim(), att = postAtt.get(); if (!text && !att) return;
     const btn = $("postBtn"); btn.disabled = true;
-    try { await D.createPost(text.slice(0,1200)); $("postIn").value = ""; $("postCount").textContent = ""; }
+    try { await D.createPost(text.slice(0,1200), att); $("postIn").value = ""; $("postCount").textContent = ""; postAtt.clear(); }
     catch(e){ writeErr(e); }
     finally { btn.disabled = false; }
   });
@@ -297,6 +309,117 @@ function renderMeChip(){
   $("postAv").replaceChildren(document.createTextNode(me.emoji)); $("postAv").style.borderColor = accent(me);
 }
 
+// ---------- attachments ----------
+const MAX_IMG = 850000; // data-URL length limit (rules allow 900 KB)
+function readDataURL(file){ return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+function imgDims(src){ return new Promise(res => { const i = new Image(); i.onload = () => res({ w: i.naturalWidth, h: i.naturalHeight }); i.onerror = () => res({ w: 0, h: 0 }); i.src = src; }); }
+async function prepImage(file){
+  if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error("Doar imagini (PNG, JPG, WEBP, GIF).");
+  if (file.type === "image/gif"){
+    if (file.size > 620000) throw new Error("GIF-ul e prea mare (max 600 KB). Încearcă butonul GIF.");
+    const data = await readDataURL(file); const d = await imgDims(data);
+    return { data, w: d.w, h: d.h };
+  }
+  const src = await readDataURL(file); const d = await imgDims(src);
+  const img = new Image(); img.src = src; await img.decode().catch(() => {});
+  let scale = Math.min(1, 1600 / Math.max(d.w || 1, d.h || 1));
+  for (let round = 0; round < 6; round++){
+    const w = Math.max(1, Math.round(d.w * scale)), h = Math.max(1, Math.round(d.h * scale));
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const g = c.getContext("2d"); g.fillStyle = "#111"; g.fillRect(0, 0, w, h); g.drawImage(img, 0, 0, w, h);
+    for (const q of [0.85, 0.72, 0.6]){
+      const data = c.toDataURL("image/jpeg", q);
+      if (data.length <= MAX_IMG) return { data, w, h };
+    }
+    scale *= 0.7;
+  }
+  throw new Error("Imaginea e prea mare.");
+}
+function attachBox(kind){
+  // kind: "chat" | "post"; returns controller with get/clear
+  const st = { att: null };
+  const prev = $(kind + "Prev");
+  function show(){
+    if (!st.att){ prev.classList.add("hidden"); prev.replaceChildren(); return; }
+    const src = st.att.img ? st.att.img.data : st.att.gif.thumb || st.att.gif.url;
+    prev.replaceChildren(h("img",{src,alt:""}), h("span",{class:"note",text: st.att.img ? "Imagine atașată" : "GIF"}),
+      h("button",{type:"button",class:"icon",title:"Elimină","aria-label":"Elimină atașamentul",text:"✕",onclick:()=>{ st.att = null; show(); }}));
+    prev.classList.remove("hidden");
+  }
+  async function useFile(file){
+    try { st.att = { img: await prepImage(file) }; show(); }
+    catch(e){ flash(e.message || "Imaginea nu a putut fi încărcată.", true); }
+  }
+  const input = h("input",{type:"file",accept:"image/png,image/jpeg,image/webp,image/gif",class:"hidden"});
+  input.addEventListener("change", () => { if (input.files[0]) useFile(input.files[0]); input.value = ""; });
+  document.body.append(input);
+  $(kind + "Attach").onclick = () => input.click();
+  $(kind + "Gif").onclick = ev => openGifPicker(ev.currentTarget, g => { st.att = { gif: g }; show(); });
+  return { get: () => st.att, clear: () => { st.att = null; show(); }, useFile };
+}
+function attEl(m){
+  if (m.img){
+    const el = h("img",{class:"att",alt:"imagine",loading:"lazy"});
+    if (m.w && m.h) el.style.aspectRatio = m.w + "/" + m.h;
+    D.getImage(m.img).then(src => { if (src){ el.src = src; el.onclick = () => lightbox(src); } else el.replaceWith(h("div",{class:"note",text:"(imagine ștearsă)"})); });
+    return el;
+  }
+  if (m.gif && typeof m.gif.url === "string" && /^https:\/\/[a-z0-9.-]*klipy\.com\//.test(m.gif.url)){
+    const el = h("img",{class:"att",alt:"GIF",loading:"lazy",src:m.gif.url});
+    if (m.gif.w && m.gif.h){ el.style.aspectRatio = m.gif.w + "/" + m.gif.h; el.style.width = Math.min(m.gif.w, 300) + "px"; }
+    el.onclick = () => lightbox(m.gif.url);
+    return el;
+  }
+  return null;
+}
+function lightbox(src){
+  openId = null;
+  $("overlay").replaceChildren(h("img",{class:"lightbox",src,alt:""}), h("button",{class:"close lb-close",type:"button","aria-label":"Închide",text:"✕",onclick:closeProfile}));
+  $("overlay").classList.remove("hidden");
+}
+
+// ---------- GIF picker (KLIPY) ----------
+let gifPop = null;
+async function gifSearch(q){
+  const url = "https://api.klipy.com/v2/" + (q ? "search" : "featured") + "?key=" + encodeURIComponent(KLIPY_KEY) +
+    "&limit=24&media_filter=gif,tinygif&contentfilter=medium&locale=ro_RO" + (q ? "&q=" + encodeURIComponent(q) : "");
+  const r = await fetch(url, { referrerPolicy: "no-referrer" });
+  if (!r.ok) throw new Error("http " + r.status);
+  const j = await r.json();
+  const list = j.results || (j.data && (j.data.data || j.data)) || [];
+  return (Array.isArray(list) ? list : []).map(x => {
+    const mf = x.media_formats;
+    if (mf && mf.gif) { const dims = mf.gif.dims || [0,0]; return { url: mf.gif.url, thumb: (mf.tinygif || mf.gif).url, w: Math.round(dims[0]), h: Math.round(dims[1]) }; }
+    const f = x.file || {}, pick = s => f[s] && (f[s].gif || f[s].webp);
+    const big = pick("md") || pick("hd") || pick("sm"), small = pick("sm") || pick("xs") || big;
+    return big ? { url: big.url, thumb: small.url, w: Math.round(big.width || 0), h: Math.round(big.height || 0) } : null;
+  }).filter(g => g && /^https:\/\/[a-z0-9.-]*klipy\.com\//.test(g.url));
+}
+function closeGifPicker(){ if (gifPop){ gifPop.remove(); gifPop = null; } }
+function openGifPicker(anchor, onPick){
+  if (gifPop){ closeGifPicker(); return; }
+  const grid = h("div",{class:"gif-grid"});
+  const input = h("input",{placeholder:"Caută GIF-uri…",type:"search"});
+  gifPop = h("div",{class:"gif-pop"}, input, grid, h("div",{class:"gif-foot note",text:"Powered by KLIPY"}));
+  document.body.append(gifPop);
+  const r = anchor.getBoundingClientRect();
+  gifPop.style.left = Math.max(8, Math.min(window.innerWidth - 348, r.left)) + "px";
+  gifPop.style.bottom = (window.innerHeight - r.top + 8) + "px";
+  if (!KLIPY_KEY){ grid.replaceChildren(h("div",{class:"note",style:"padding:12px",text:"Căutarea de GIF-uri nu e configurată încă (lipsește cheia KLIPY). Poți totuși atașa un GIF de pe dispozitiv cu 📎."})); return; }
+  let t = null, seq = 0;
+  async function load(q){
+    const my = ++seq; grid.replaceChildren(h("div",{class:"note",style:"padding:12px",text:"Se încarcă…"}));
+    try {
+      const res = await gifSearch(q); if (my !== seq) return;
+      grid.replaceChildren(...(res.length ? res.map(g => h("button",{type:"button",class:"gif-item",title:"Trimite GIF",onclick:()=>{ closeGifPicker(); onPick(g); }}, h("img",{src:g.thumb,alt:"GIF",loading:"lazy"}))) : [h("div",{class:"note",style:"padding:12px",text:"Niciun rezultat."})]));
+    } catch(e){ if (my === seq) grid.replaceChildren(h("div",{class:"note",style:"padding:12px",text:"GIF-urile nu s-au putut încărca."})); }
+  }
+  input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => load(input.value.trim()), 350); });
+  input.focus(); load("");
+}
+document.addEventListener("click", e => { if (gifPop && !gifPop.contains(e.target) && !e.target.closest(".gif-btn")) closeGifPicker(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeGifPicker(); });
+
 // ---------- chat ----------
 function nearBottom(el){ return el.scrollHeight - el.scrollTop - el.clientHeight < 120; }
 function scrollChat(force){ const el = $("msgs"); if (force || nearBottom(el)) requestAnimationFrame(() => el.scrollTop = el.scrollHeight); }
@@ -311,13 +434,14 @@ function renderChat(prevLast){
     const dk = dayKey(new Date(m.ts));
     if (dk !== lastDay){ out.push(h("div",{class:"daysep"}, h("span",{text:niceDay(dk)}))); lastDay = dk; last = null; }
     const grouped = last && last.uid === m.uid && m.ts - last.ts < 5*60000;
-    const del = (m.uid === uid || isAdmin) ? h("button",{class:"link mdel",type:"button",text:"șterge",onclick:()=>D.deleteChat(m.id).catch(writeErr)}) : null;
+    const del = (m.uid === uid || isAdmin) ? h("button",{class:"link mdel",type:"button",text:"șterge",onclick:()=>D.deleteChat(m.id, m.img).catch(writeErr)}) : null;
     const cls = "msg" + (grouped ? "" : " first") + (m.uid !== uid && mentionsMe(m.text) ? " mine-mention" : "");
     out.push(h("div",{class:cls},
       grouped ? h("div",{class:"gutter"}) : avatar(m.uid),
       h("div",{class:"grow"},
         grouped ? null : h("div",{class:"who"}, nameEl(m.uid), h("span",{text:timeStr(m.ts)}), del),
-        h("div",{class:"txt"}, withMentions(m.text), grouped ? del : null))));
+        m.text ? h("div",{class:"txt"}, withMentions(m.text), grouped && !(m.img || m.gif) ? del : null) : null,
+        (m.img || m.gif) ? h("div",{class:"attwrap"}, attEl(m), grouped ? del : null) : null)));
     last = m;
   }
   box.replaceChildren(...out);
@@ -374,7 +498,7 @@ function postCard(post){
   }
   const rc = Math.max(0, post.replyCount || 0);
   reacts.append(h("button",{type:"button",class:"link",style:"margin-left:auto",text: openReplies.has(post.id) ? "Ascunde comentariile" : (rc ? "💬 " + rc + (rc===1?" comentariu":" comentarii") : "💬 Comentează"),onclick:()=>toggleReplies(post)}));
-  if (post.uid === uid || isAdmin) reacts.append(h("button",{type:"button",class:"link",text:"șterge",onclick:()=>{ if (confirmTwice(post.id)) D.deletePost(post.id).catch(writeErr); }}));
+  if (post.uid === uid || isAdmin) reacts.append(h("button",{type:"button",class:"link",text:"șterge",onclick:()=>{ if (confirmTwice(post.id)) D.deletePost(post.id, post.img).catch(writeErr); }}));
   let replies = null;
   const entry = openReplies.get(post.id);
   if (entry){
@@ -391,7 +515,8 @@ function postCard(post){
     h("div",{class:"row",style:"align-items:flex-start"}, avatar(post.uid),
       h("div",{class:"grow"},
         h("div",{class:"meta"}, nameEl(post.uid), h("span",{text:(P(post.uid)||{}).platform||""}), h("span",{text:"· " + ago(post.ts)})),
-        h("div",{class:"text"}, withMentions(post.text)),
+        post.text ? h("div",{class:"text"}, withMentions(post.text)) : null,
+        (post.img || post.gif) ? h("div",{class:"attwrap"}, attEl(post)) : null,
         reacts, replies)));
 }
 function renderFeed(){
@@ -433,7 +558,7 @@ function profileView(id, p, preview){
       h("div",{class:"stats-grid"}, FIELDS.map(([f,l]) => h("div",{class:"stat"}, h("div",{class:"n c-"+f,text:String(t[f])}), h("div",{class:"k",text:l})))),
       h("div",{class:"note",style:"margin-top:8px"}, "Azi: " + FIELDS.map(([f,l]) => today[f] + " " + l.toLowerCase()).join(" · ")),
       theirPosts.length ? h("div",{class:"h2",style:"margin-top:18px"},"Postări recente") : null,
-      theirPosts.map(x => h("div",{class:"fact",style:"margin-bottom:8px"}, h("div",{class:"k",text:ago(x.ts)}), h("div",{class:"v",style:"font-weight:500;white-space:pre-wrap",text: x.text.length > 220 ? x.text.slice(0,220)+"…" : x.text}))),
+      theirPosts.map(x => h("div",{class:"fact",style:"margin-bottom:8px"}, h("div",{class:"k",text:ago(x.ts)}), h("div",{class:"v",style:"font-weight:500;white-space:pre-wrap",text: !x.text ? (x.img ? "🖼️ imagine" : "🎞️ GIF") : x.text.length > 220 ? x.text.slice(0,220)+"…" : x.text}))),
       preview ? null : h("div",{class:"row",style:"margin-top:16px;gap:8px"},
         id === uid ? h("button",{class:"primary",type:"button",text:"Editează profilul",onclick:()=>{ closeProfile(); location.hash = "#me"; }})
                    : h("button",{class:"primary",type:"button",text:"Dă-i tag în chat",onclick:()=>{ closeProfile(); location.hash = "#chat"; const ci = $("chatIn"); ci.value = "@" + p.tag + " " + ci.value; setTimeout(()=>ci.focus(),60); }})))
