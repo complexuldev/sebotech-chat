@@ -13,7 +13,7 @@ const BANNERS = {
 const PLATFORMS = ["PC","PlayStation","Xbox","Switch","Mobile"];
 const MODES = ["Battle Royale","Zero Build","Ranked","Reload","Creative","Duos","Squads","Arena"];
 const REACTS = [["fire","🔥"],["skull","💀"],["trophy","🏆"],["lol","😂"],["goat","🐐"]];
-const FIELDS = [["wins","Wins"],["kills","Kills"],["chests","Chests"],["matches","Matches"]];
+const FIELDS = [["wins","Victorii"],["kills","Kill-uri"],["chests","Cufere"],["matches","Meciuri"]];
 const ZERO = () => ({wins:0,kills:0,chests:0,matches:0});
 const ONLINE_MS = 150000, TYPING_MS = 8000;
 
@@ -42,13 +42,13 @@ const dayKey = d => d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate());
 const parseDay = k => { const [y,m,d] = k.split("-").map(Number); return new Date(y,m-1,d); };
 const shiftDay = (k,n) => { const d = parseDay(k); d.setDate(d.getDate()+n); return dayKey(d); };
 const todayKey = () => dayKey(new Date());
-function niceDay(k){ const t = todayKey(); if (k===t) return "Today"; if (k===shiftDay(t,-1)) return "Yesterday"; return parseDay(k).toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"short"}); }
-const timeStr = ts => new Date(ts).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
+function niceDay(k){ const t = todayKey(); if (k===t) return "Azi"; if (k===shiftDay(t,-1)) return "Ieri"; return parseDay(k).toLocaleDateString("ro-RO",{weekday:"long",day:"numeric",month:"short"}); }
+const timeStr = ts => new Date(ts).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"});
 function ago(ts){
   const s = Math.floor((Date.now()-ts)/1000);
-  if (s < 60) return "just now"; if (s < 3600) return Math.floor(s/60)+"m ago"; if (s < 86400) return Math.floor(s/3600)+"h ago";
-  if (s < 7*86400) return Math.floor(s/86400)+"d ago";
-  return new Date(ts).toLocaleDateString(undefined,{day:"numeric",month:"short"});
+  if (s < 60) return "acum"; if (s < 3600) return "acum " + Math.floor(s/60) + " min"; if (s < 86400) return "acum " + Math.floor(s/3600) + " h";
+  if (s < 7*86400) return "acum " + Math.floor(s/86400) + " zile";
+  return new Date(ts).toLocaleDateString("ro-RO",{day:"numeric",month:"short"});
 }
 
 // state
@@ -90,16 +90,16 @@ let bannerTimer = null;
 function flash(msg, warn){ setBanner(msg, warn); clearTimeout(bannerTimer); bannerTimer = setTimeout(() => setBanner(null), 4000); }
 function writeErr(e){
   const c = D.errCode(e);
-  if (c === "permission-denied") flash("Blocked: you're sending too fast, or that isn't allowed. Wait a second and try again.", true);
-  else if (c === "resource-exhausted") flash("The free database limit for today is used up. Try again tomorrow.", true);
-  else if (c === "unavailable") flash("You're offline. It'll send when you reconnect.", true);
-  else flash("That didn't go through. Try again.", true);
+  if (c === "permission-denied") flash("Blocat: trimiți prea repede sau nu ai voie. Așteaptă o secundă și încearcă din nou.", true);
+  else if (c === "resource-exhausted") flash("S-a terminat limita gratuită pe azi. Încearcă mâine.", true);
+  else if (c === "unavailable") flash("Ești offline. Se trimite când revii online.", true);
+  else flash("N-a mers. Încearcă din nou.", true);
 }
 
 // ---------- auth flow ----------
 $("signInBtn").addEventListener("click", async () => {
   $("signInErr").textContent = "";
-  try { await D.signIn(); } catch(e){ if (D.errCode(e) !== "auth/popup-closed-by-user") $("signInErr").textContent = "Sign-in didn't work. Allow pop-ups for this site and try again."; }
+  try { await D.signIn(); } catch(e){ if (D.errCode(e) !== "auth/popup-closed-by-user") $("signInErr").textContent = "Conectarea n-a mers. Permite pop-up-urile pentru site și încearcă din nou."; }
 });
 for (const id of ["gateSignOut","signOutBtn"]) $(id).addEventListener("click", () => D.signOutUser().then(() => location.reload()));
 
@@ -111,31 +111,31 @@ D.onAuth(async u => {
     if (await D.isMember()) return startApp();
     const done = await D.isSetupDone();
     if (!done && OWNER_EMAIL && email.toLowerCase() === OWNER_EMAIL.toLowerCase()) return showScreen("setup");
-    if (!done){ showGate("This site hasn't been set up yet. The owner needs to sign in first."); return; }
+    if (!done){ showGate("Site-ul nu e configurat încă. Proprietarul trebuie să se conecteze primul."); return; }
     showGate();
-  } catch(e){ $("loadingMsg").textContent = "Couldn't connect (" + D.errCode(e) + "). Refresh to try again."; }
+  } catch(e){ $("loadingMsg").textContent = "Nu m-am putut conecta (" + D.errCode(e) + "). Dă refresh și încearcă din nou."; }
 });
 
 // ---------- setup (owner, once) ----------
 $("setupBtn").addEventListener("click", async () => {
-  const btn = $("setupBtn"); btn.disabled = true; btn.textContent = "Creating keys…"; $("setupErr").textContent = "";
+  const btn = $("setupBtn"); btn.disabled = true; btn.textContent = "Se creează cheile…"; $("setupErr").textContent = "";
   try {
     const ks = await D.bootstrap(5);
     prefillKey = ks[0];
     $("setupBody").replaceChildren(
-      h("p",{class:"note",style:"margin-top:0",text:"Your keys are below. Copy them somewhere safe NOW. They're stored scrambled, so they can't be shown again. Key 1 is yours."}),
-      ...ks.map((k,i) => keyLine(k, i === 0 ? "Owner key (yours)" : "Key " + (i+1))),
-      h("button",{class:"primary",type:"button",style:"width:100%;margin-top:14px",text:"I've saved them, continue",onclick:()=>showGate()}));
+      h("p",{class:"note",style:"margin-top:0",text:"Cheile tale sunt mai jos. Copiază-le ACUM undeva sigur. Sunt salvate criptat, deci nu mai pot fi afișate. Cheia 1 e a ta."}),
+      ...ks.map((k,i) => keyLine(k, i === 0 ? "Cheia ta 👑" : "Cheia " + (i+1))),
+      h("button",{class:"primary",type:"button",style:"width:100%;margin-top:14px",text:"Le-am salvat, continuă",onclick:()=>showGate()}));
   } catch(e){
-    btn.disabled = false; btn.textContent = "Create my 5 keys";
-    $("setupErr").textContent = D.errCode(e) === "permission-denied" ? "Not allowed. Check that your email is set as the owner in firestore.rules, and that setup hasn't already been done." : "Something went wrong: " + D.errCode(e);
+    btn.disabled = false; btn.textContent = "Creează cele 5 chei";
+    $("setupErr").textContent = D.errCode(e) === "permission-denied" ? "Nu ai voie. Verifică dacă emailul tău e setat ca proprietar și dacă configurarea nu a fost deja făcută." : "Ceva n-a mers: " + D.errCode(e);
   }
 });
 function keyLine(k, label){
   return h("div",{class:"row",style:"margin-top:8px"},
     h("span",{class:"pill",text:label}),
     h("code",{class:"grow",style:"font-size:15px;letter-spacing:1px;color:var(--accent)",text:k}),
-    h("button",{class:"tiny",type:"button",text:"Copy",onclick:ev => { const b = ev.currentTarget; navigator.clipboard.writeText(k).then(() => b.textContent = "Copied ✓", () => b.textContent = "Select & copy"); }}));
+    h("button",{class:"tiny",type:"button",text:"Copiază",onclick:ev => { const b = ev.currentTarget; navigator.clipboard.writeText(k).then(() => b.textContent = "Copiat ✓", () => b.textContent = "Selectează și copiază"); }}));
 }
 
 // ---------- gate ----------
@@ -156,15 +156,15 @@ $("gateForm").addEventListener("submit", async ev => {
   ev.preventDefault();
   const err = $("gateErr"); err.textContent = "";
   const key = $("keyIn").value.trim().toUpperCase(), tag = $("tagIn").value.trim();
-  if (!/^SEBO-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) return err.textContent = "That doesn't look like a key. It should look like SEBO-XXXX-XXXX-XXXX.";
-  if (!tag) return err.textContent = "Pick a gamertag.";
-  const btn = $("gateBtn"); btn.disabled = true; btn.textContent = "Checking key…";
+  if (!/^SEBO-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) return err.textContent = "Asta nu arată a cheie. Ar trebui să arate așa: SEBO-XXXX-XXXX-XXXX.";
+  if (!tag) return err.textContent = "Alege un gamertag.";
+  const btn = $("gateBtn"); btn.disabled = true; btn.textContent = "Verific cheia…";
   try {
     await D.join(key, { tag: tag.slice(0,24), emoji: gateEmoji, platform: $("platIn").value, bio:"", color: COLORS[Math.floor(Math.random()*COLORS.length)], banner:"neon", mode:"Battle Royale", drop:"", main:"", status:"", lfg:false });
     startApp();
   } catch(e){
-    err.textContent = D.errCode(e) === "permission-denied" ? "That key doesn't work or was already used. Each key works once." : "Something went wrong (" + D.errCode(e) + "). Try again.";
-    btn.disabled = false; btn.textContent = "Enter SeboTECH CHAT";
+    err.textContent = D.errCode(e) === "permission-denied" ? "Cheia nu merge sau a fost deja folosită. Fiecare cheie merge o singură dată." : "Ceva n-a mers (" + D.errCode(e) + "). Încearcă din nou.";
+    btn.disabled = false; btn.textContent = "Intră în SeboTECH CHAT 🚀";
   }
 });
 
@@ -172,7 +172,7 @@ $("gateForm").addEventListener("submit", async ev => {
 function startApp(){
   if (started) return; started = true;
   showScreen("loading");
-  const bootTimer = setTimeout(() => { $("loadingMsg").textContent = "Still connecting… check your internet."; }, 10000);
+  const bootTimer = setTimeout(() => { $("loadingMsg").textContent = "Încă mă conectez… verifică internetul."; }, 10000);
   unsubs.push(D.watchMembers((list, cached) => {
     clearTimeout(bootTimer);
     profiles = {}; for (const m of list) profiles[m.id] = m;
@@ -183,16 +183,16 @@ function startApp(){
     if (isAdmin && !wasAdmin) startAdmin();
     $("keysCard").classList.toggle("hidden", !isAdmin);
     renderAll();
-  }, e => { clearTimeout(bootTimer); $("loadingMsg").textContent = "Couldn't load (" + D.errCode(e) + ")."; }));
+  }, e => { clearTimeout(bootTimer); $("loadingMsg").textContent = "Nu s-a putut încărca (" + D.errCode(e) + ")."; }));
 
   unsubs.push(D.watchChat(list => {
     const prevLast = chat.length ? chat[chat.length-1].ts : 0;
     chat = list.slice().sort((a,b)=>a.ts-b.ts);
     if (view !== "chat"){ unread = chat.filter(m => m.ts > lastSeenChat && m.uid !== uid).length; renderBadge(); }
     renderChat(prevLast);
-  }, () => $("msgs").replaceChildren(h("div",{class:"empty",text:"Couldn't load the chat."}))));
+  }, () => $("msgs").replaceChildren(h("div",{class:"empty",text:"Chatul nu s-a putut încărca."}))));
 
-  unsubs.push(D.watchPosts(list => { posts = list.sort((a,b)=>b.ts-a.ts); renderFeed(); }, () => $("feedList").replaceChildren(h("div",{class:"empty",text:"Couldn't load the feed."}))));
+  unsubs.push(D.watchPosts(list => { posts = list.sort((a,b)=>b.ts-a.ts); renderFeed(); }, () => $("feedList").replaceChildren(h("div",{class:"empty",text:"Postările nu s-au putut încărca."}))));
   unsubs.push(D.watchTotals(t => { totals = t; renderStats(); renderSquad(); }));
   unsubs.push(D.watchPresence(list => { presence = list; computeOnline(); }));
   setInterval(computeOnline, 15000);
@@ -277,9 +277,9 @@ function bindUi(){
   $("newKeyForm").addEventListener("submit", async ev => {
     ev.preventDefault();
     try {
-      const k = await D.createKey($("newKeyLabel").value.trim().slice(0,40) || "Extra key");
+      const k = await D.createKey($("newKeyLabel").value.trim().slice(0,40) || "Cheie extra");
       $("newKeyLabel").value = "";
-      $("newKeyOut").replaceChildren(h("p",{class:"note",style:"margin:12px 0 0",text:"New key. Copy it now, it won't be shown again:"}), keyLine(k, "New"));
+      $("newKeyOut").replaceChildren(h("p",{class:"note",style:"margin:12px 0 0",text:"Cheie nouă. Copiaz-o acum, nu va mai fi afișată:"}), keyLine(k, "Nouă"));
     } catch(e){ writeErr(e); }
   });
   $("overlay").addEventListener("click", e => { if (e.target.id === "overlay") closeProfile(); });
@@ -305,13 +305,13 @@ function renderChat(prevLast){
   const box = $("msgs");
   const stick = nearBottom(box) || (prevLast !== undefined && chat.length && chat[chat.length-1].uid === uid && chat[chat.length-1].ts > prevLast);
   const vis = chat.filter(m => profiles[m.uid]);
-  if (!vis.length){ box.replaceChildren(h("div",{class:"empty",text:"No messages yet. Say something 👋"})); return; }
+  if (!vis.length){ box.replaceChildren(h("div",{class:"empty",text:"Niciun mesaj încă. Zi ceva 👋"})); return; }
   const out = []; let lastDay = null, last = null;
   for (const m of vis){
     const dk = dayKey(new Date(m.ts));
     if (dk !== lastDay){ out.push(h("div",{class:"daysep"}, h("span",{text:niceDay(dk)}))); lastDay = dk; last = null; }
     const grouped = last && last.uid === m.uid && m.ts - last.ts < 5*60000;
-    const del = (m.uid === uid || isAdmin) ? h("button",{class:"link mdel",type:"button",text:"delete",onclick:()=>D.deleteChat(m.id).catch(writeErr)}) : null;
+    const del = (m.uid === uid || isAdmin) ? h("button",{class:"link mdel",type:"button",text:"șterge",onclick:()=>D.deleteChat(m.id).catch(writeErr)}) : null;
     const cls = "msg" + (grouped ? "" : " first") + (m.uid !== uid && mentionsMe(m.text) ? " mine-mention" : "");
     out.push(h("div",{class:cls},
       grouped ? h("div",{class:"gutter"}) : avatar(m.uid),
@@ -325,12 +325,12 @@ function renderChat(prevLast){
 }
 function renderTyping(){
   const names = [...typingUids].map(id => P(id) && P(id).tag).filter(Boolean);
-  $("typing").textContent = !names.length ? "" : names.length === 1 ? names[0] + " is typing…" : names.slice(0,-1).join(", ") + " and " + names.slice(-1) + " are typing…";
+  $("typing").textContent = !names.length ? "" : names.length === 1 ? names[0] + " scrie…" : names.slice(0,-1).join(", ") + " și " + names.slice(-1) + " scriu…";
 }
 function personRow(id){
   const p = P(id);
   return h("div",{class:"person",onclick:()=>openProfile(id)}, avatar(id,"sm"),
-    h("div",{class:"meta grow"}, h("div",{style:"font-weight:600;color:"+accent(p),text:p.tag + (id===uid?" (you)":"")}), h("div",{class:"st",text: p.status || p.platform})),
+    h("div",{class:"meta grow"}, h("div",{style:"font-weight:600;color:"+accent(p),text:p.tag + (id===uid?" (tu)":"")}), h("div",{class:"st",text: p.status || p.platform})),
     p.lfg ? h("span",{class:"pill lfg",text:"LFG"}) : null);
 }
 function renderOnline(){
@@ -339,7 +339,7 @@ function renderOnline(){
   const on = ids.filter(id => online.has(id)), off = ids.filter(id => !online.has(id));
   $("onlineCount").textContent = on.length;
   $("onlineList").replaceChildren(...on.map(personRow));
-  $("offlineList").replaceChildren(...(off.length ? off.map(personRow) : [h("div",{class:"note",text:"Everyone's here 🔥"})]));
+  $("offlineList").replaceChildren(...(off.length ? off.map(personRow) : [h("div",{class:"note",text:"Toată lumea e aici 🔥"})]));
 }
 
 // ---------- feed ----------
@@ -365,7 +365,7 @@ async function addReply(post, input){
   finally { input.disabled = false; input.focus(); }
 }
 const pendingDel = new Map();
-function confirmTwice(id){ const t = pendingDel.get(id); if (t && Date.now()-t < 4000){ pendingDel.delete(id); return true; } pendingDel.set(id, Date.now()); flash("Click delete again to remove it."); return false; }
+function confirmTwice(id){ const t = pendingDel.get(id); if (t && Date.now()-t < 4000){ pendingDel.delete(id); return true; } pendingDel.set(id, Date.now()); flash("Apasă din nou pe șterge ca să confirmi."); return false; }
 function postCard(post){
   const reacts = h("div",{class:"reacts"});
   for (const [k,e] of REACTS){
@@ -373,19 +373,19 @@ function postCard(post){
     reacts.append(h("button",{type:"button",class:on?"on":"",text:e+(n?" "+n:""),onclick:()=>toggleReact(post,k)}));
   }
   const rc = Math.max(0, post.replyCount || 0);
-  reacts.append(h("button",{type:"button",class:"link",style:"margin-left:auto",text: openReplies.has(post.id) ? "Hide comments" : (rc ? "💬 " + rc + (rc===1?" comment":" comments") : "💬 Comment"),onclick:()=>toggleReplies(post)}));
-  if (post.uid === uid || isAdmin) reacts.append(h("button",{type:"button",class:"link",text:"delete",onclick:()=>{ if (confirmTwice(post.id)) D.deletePost(post.id).catch(writeErr); }}));
+  reacts.append(h("button",{type:"button",class:"link",style:"margin-left:auto",text: openReplies.has(post.id) ? "Ascunde comentariile" : (rc ? "💬 " + rc + (rc===1?" comentariu":" comentarii") : "💬 Comentează"),onclick:()=>toggleReplies(post)}));
+  if (post.uid === uid || isAdmin) reacts.append(h("button",{type:"button",class:"link",text:"șterge",onclick:()=>{ if (confirmTwice(post.id)) D.deletePost(post.id).catch(writeErr); }}));
   let replies = null;
   const entry = openReplies.get(post.id);
   if (entry){
-    const input = h("input",{placeholder:"Write a comment…",maxlength:"500"});
+    const input = h("input",{placeholder:"Scrie un comentariu…",maxlength:"500"});
     input.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); addReply(post,input); } });
     replies = h("div",{class:"replies"},
       entry.list.filter(r => profiles[r.uid]).map(r => h("div",{class:"reply"}, avatar(r.uid,"sm"),
         h("div",{class:"grow"}, h("div",null, nameEl(r.uid), h("span",{class:"note",text:"  " + ago(r.ts)}),
-          (r.uid===uid||isAdmin) ? h("button",{class:"link",style:"margin-left:8px",type:"button",text:"delete",onclick:()=>D.deleteReply(post.id, r.id).catch(writeErr)}) : null),
+          (r.uid===uid||isAdmin) ? h("button",{class:"link",style:"margin-left:8px",type:"button",text:"șterge",onclick:()=>D.deleteReply(post.id, r.id).catch(writeErr)}) : null),
           h("div",{class:"rt"}, withMentions(r.text))))),
-      h("div",{class:"row",style:"margin-top:8px"}, input, h("button",{type:"button",class:"tiny",text:"Reply",onclick:()=>addReply(post,input)})));
+      h("div",{class:"row",style:"margin-top:8px"}, input, h("button",{type:"button",class:"tiny",text:"Răspunde",onclick:()=>addReply(post,input)})));
   }
   return h("div",{class:"card post"},
     h("div",{class:"row",style:"align-items:flex-start"}, avatar(post.uid),
@@ -397,7 +397,7 @@ function postCard(post){
 function renderFeed(){
   if (!me) return;
   const vis = posts.filter(p => profiles[p.uid]);
-  $("feedList").replaceChildren(...(vis.length ? vis.map(postCard) : [h("div",{class:"empty",text:"No posts yet. Drop the first one 🎮"})]));
+  $("feedList").replaceChildren(...(vis.length ? vis.map(postCard) : [h("div",{class:"empty",text:"Nicio postare încă. Fă tu prima 🎮"})]));
 }
 
 // ---------- squad ----------
@@ -411,8 +411,8 @@ function renderSquad(){
       h("div",{class:"bd"}, avatar(id),
         h("div",{class:"nm",style:"color:"+accent(p)}, p.tag),
         h("div",{class:"row",style:"gap:6px;margin-top:4px;flex-wrap:wrap"}, h("span",{class:"pill",text:p.platform}), p.lfg ? h("span",{class:"pill lfg",text:"LFG"}) : null, p.role === "admin" ? h("span",{class:"pill",text:"admin"}) : null, online.has(id) ? h("span",{class:"pill",style:"color:var(--green)",text:"● online"}) : null),
-        h("div",{class:"bio",text:p.bio || p.status || "No bio yet."}),
-        h("div",{class:"mini"}, h("span",null,h("b",{text:String(t.wins)})," wins"), h("span",null,h("b",{text:String(t.kills)})," kills"), h("span",null,h("b",{text:String(t.chests)})," 📦"))));
+        h("div",{class:"bio",text:p.bio || p.status || "Fără bio încă."}),
+        h("div",{class:"mini"}, h("span",null,h("b",{text:String(t.wins)})," victorii"), h("span",null,h("b",{text:String(t.kills)})," kill-uri"), h("span",null,h("b",{text:String(t.chests)})," 📦"))));
   }));
 }
 
@@ -425,25 +425,25 @@ function profileView(id, p, preview){
     h("div",{class:"bn",style:"background:"+bannerOf(p)}),
     h("div",{class:"bd"},
       h("span",{class:"av lg",style:"border-color:var(--panel);box-shadow:0 0 0 3px "+accent(p)}, p.emoji, online.has(id) ? h("span",{class:"dot",style:"width:18px;height:18px"}) : null),
-      h("div",{class:"nm"}, h("span",{style:"color:"+accent(p),text:p.tag}), h("span",{class:"pill",text:p.platform}), p.lfg ? h("span",{class:"pill lfg",text:"Looking for squad"}) : null),
+      h("div",{class:"nm"}, h("span",{style:"color:"+accent(p),text:p.tag}), h("span",{class:"pill",text:p.platform}), p.lfg ? h("span",{class:"pill lfg",text:"Caută echipă"}) : null),
       p.status ? h("div",{class:"note",style:"margin-top:2px",text:"“" + p.status + "”"}) : null,
       p.bio ? h("p",{style:"margin:12px 0 0;white-space:pre-wrap",text:p.bio}) : null,
-      h("div",{class:"facts"}, fact("Favorite mode",p.mode), fact("Drops at",p.drop), fact("Main loadout",p.main), fact("Joined", p.joined ? new Date(p.joined).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}) : "")),
-      h("div",{class:"h2",style:"margin-top:18px"},"All-time"),
+      h("div",{class:"facts"}, fact("Modul preferat",p.mode), fact("Aterizează la",p.drop), fact("Loadout principal",p.main), fact("Membru din", p.joined ? new Date(p.joined).toLocaleDateString("ro-RO",{day:"numeric",month:"short",year:"numeric"}) : "")),
+      h("div",{class:"h2",style:"margin-top:18px"},"Total"),
       h("div",{class:"stats-grid"}, FIELDS.map(([f,l]) => h("div",{class:"stat"}, h("div",{class:"n c-"+f,text:String(t[f])}), h("div",{class:"k",text:l})))),
-      h("div",{class:"note",style:"margin-top:8px"}, "Today: " + FIELDS.map(([f,l]) => today[f] + " " + l.toLowerCase()).join(" · ")),
-      theirPosts.length ? h("div",{class:"h2",style:"margin-top:18px"},"Recent posts") : null,
+      h("div",{class:"note",style:"margin-top:8px"}, "Azi: " + FIELDS.map(([f,l]) => today[f] + " " + l.toLowerCase()).join(" · ")),
+      theirPosts.length ? h("div",{class:"h2",style:"margin-top:18px"},"Postări recente") : null,
       theirPosts.map(x => h("div",{class:"fact",style:"margin-bottom:8px"}, h("div",{class:"k",text:ago(x.ts)}), h("div",{class:"v",style:"font-weight:500;white-space:pre-wrap",text: x.text.length > 220 ? x.text.slice(0,220)+"…" : x.text}))),
       preview ? null : h("div",{class:"row",style:"margin-top:16px;gap:8px"},
-        id === uid ? h("button",{class:"primary",type:"button",text:"Edit profile",onclick:()=>{ closeProfile(); location.hash = "#me"; }})
-                   : h("button",{class:"primary",type:"button",text:"@ them in chat",onclick:()=>{ closeProfile(); location.hash = "#chat"; const ci = $("chatIn"); ci.value = "@" + p.tag + " " + ci.value; setTimeout(()=>ci.focus(),60); }})))
+        id === uid ? h("button",{class:"primary",type:"button",text:"Editează profilul",onclick:()=>{ closeProfile(); location.hash = "#me"; }})
+                   : h("button",{class:"primary",type:"button",text:"Dă-i tag în chat",onclick:()=>{ closeProfile(); location.hash = "#chat"; const ci = $("chatIn"); ci.value = "@" + p.tag + " " + ci.value; setTimeout(()=>ci.focus(),60); }})))
   ];
 }
 let openId = null;
 function openProfile(id){
   const p = P(id); if (!p) return;
   openId = id;
-  $("overlay").replaceChildren(h("div",{class:"modal",role:"dialog","aria-label":p.tag+" profile"}, h("button",{class:"close",type:"button","aria-label":"Close",text:"✕",onclick:closeProfile}), ...profileView(id,p)));
+  $("overlay").replaceChildren(h("div",{class:"modal",role:"dialog","aria-label":"Profilul lui "+p.tag}, h("button",{class:"close",type:"button","aria-label":"Închide",text:"✕",onclick:closeProfile}), ...profileView(id,p)));
   $("overlay").classList.remove("hidden");
 }
 function closeProfile(){ openId = null; $("overlay").classList.add("hidden"); }
@@ -451,9 +451,9 @@ function closeProfile(){ openId = null; $("overlay").classList.add("hidden"); }
 // ---------- stats ----------
 function openStatDay(k){
   statDay = k;
-  $("dayLabel").replaceChildren(document.createTextNode(niceDay(k)), h("small",{text:parseDay(k).toLocaleDateString(undefined,{day:"numeric",month:"long",year:"numeric"})}));
+  $("dayLabel").replaceChildren(document.createTextNode(niceDay(k)), h("small",{text:parseDay(k).toLocaleDateString("ro-RO",{day:"numeric",month:"long",year:"numeric"})}));
   $("nextDay").disabled = k === todayKey();
-  $("dayLbTitle").textContent = niceDay(k) + " leaderboard";
+  $("dayLbTitle").textContent = "Clasament · " + niceDay(k);
   if (unsubDay) unsubDay();
   dayStats = {}; renderStats();
   unsubDay = D.watchDayStats(k, o => { dayStats = o; renderStats(); });
@@ -474,10 +474,10 @@ async function bump(field, delta){
 function leaderboard(src){
   const rows = Object.keys(profiles).map(id => ({id, s:Object.assign(ZERO(), src[id]||{})}))
     .sort((a,b)=> b.s.wins-a.s.wins || b.s.kills-a.s.kills || b.s.chests-a.s.chests || P(a.id).tag.localeCompare(P(b.id).tag));
-  if (!rows.length) return h("div",{class:"note",text:"Nobody here yet."});
+  if (!rows.length) return h("div",{class:"note",text:"Nimeni aici încă."});
   const medal = i => ["🥇","🥈","🥉"][i] || String(i+1);
   return h("table",{class:"lb"},
-    h("thead",null,h("tr",null, h("th",{text:"Player"}), h("th",{text:"W"}), h("th",{text:"K"}), h("th",{text:"📦"}), h("th",{text:"M"}))),
+    h("thead",null,h("tr",null, h("th",{text:"Jucător"}), h("th",{text:"V"}), h("th",{text:"K"}), h("th",{text:"📦"}), h("th",{text:"M"}))),
     h("tbody",null, rows.map((r,i) => h("tr",{class:r.id===uid?"me":""},
       h("td",{class:"who",onclick:()=>openProfile(r.id)}, h("span",{style:"width:22px;text-align:center",text: r.s.wins||r.s.kills||r.s.chests ? medal(i) : "·"}), avatar(r.id,"sm"), h("span",{style:"color:"+accent(P(r.id)),text:P(r.id).tag})),
       h("td",{class:"c-wins",text:String(r.s.wins)}), h("td",{text:String(r.s.kills)}), h("td",{text:String(r.s.chests)}), h("td",{class:"note",text:String(r.s.matches)})))));
@@ -488,8 +488,8 @@ function renderStats(){
   $("myStats").replaceChildren(...FIELDS.map(([f,l]) => h("div",{class:"stat"},
     h("div",{class:"n c-"+f,text:String(mine[f])}), h("div",{class:"k",text:l}),
     h("div",{class:"ctl"},
-      h("button",{class:"tiny",type:"button","aria-label":"Minus one "+l,text:"−",onclick:()=>bump(f,-1)}),
-      h("button",{class:"tiny",type:"button","aria-label":"Plus one "+l,text:"+",onclick:()=>bump(f,1)})))));
+      h("button",{class:"tiny",type:"button","aria-label":"Minus unu la "+l,text:"−",onclick:()=>bump(f,-1)}),
+      h("button",{class:"tiny",type:"button","aria-label":"Plus unu la "+l,text:"+",onclick:()=>bump(f,1)})))));
   $("dayLb").replaceChildren(leaderboard(dayStats));
   $("allLb").replaceChildren(leaderboard(totals));
 }
@@ -521,31 +521,32 @@ function renderPreview(){
 async function saveMe(ev){
   ev.preventDefault(); if (!draft) return;
   const tag = draft.tag.trim();
-  if (!tag){ $("meMsg").textContent = "Gamertag can't be empty."; return; }
-  if (Object.entries(profiles).some(([id,p]) => id !== uid && p.tag.toLowerCase() === tag.toLowerCase())){ $("meMsg").textContent = "Someone already has that gamertag."; return; }
-  const btn = $("meSave"); btn.disabled = true; $("meMsg").textContent = "Saving…";
+  if (!tag){ $("meMsg").textContent = "Gamertag-ul nu poate fi gol."; return; }
+  if (Object.entries(profiles).some(([id,p]) => id !== uid && p.tag.toLowerCase() === tag.toLowerCase())){ $("meMsg").textContent = "Cineva are deja gamertag-ul ăsta."; return; }
+  const btn = $("meSave"); btn.disabled = true; $("meMsg").textContent = "Se salvează…";
   try {
     await D.saveProfile({ tag: tag.slice(0,24), emoji: EMOJIS.includes(draft.emoji) ? draft.emoji : me.emoji, platform: draft.platform, bio: draft.bio.slice(0,200), color: draft.color, banner: draft.banner, mode: draft.mode, drop: draft.drop.slice(0,40), main: draft.main.slice(0,40), status: draft.status.slice(0,60), lfg: !!draft.lfg });
-    $("meMsg").textContent = "Saved ✓";
+    $("meMsg").textContent = "Salvat ✓";
   } catch(e){ $("meMsg").textContent = ""; writeErr(e); }
   finally { btn.disabled = false; }
 }
 
 // ---------- admin: keys ----------
+const keyLabel = l => String(l || "Cheie").replace("Owner key","Cheia ta 👑").replace(/^Key /,"Cheia ").replace("Extra key","Cheie extra");
 function renderKeys(){
   if (!isAdmin) return;
   const sorted = keys.slice().sort((a,b) => (b.admin - a.admin) || String(a.label).localeCompare(String(b.label), undefined, {numeric:true}));
   $("keysList").replaceChildren(...sorted.map(k => {
     const who = k.claimedBy && profiles[k.claimedBy] ? k.claimedBy : null;
     return h("div",{class:"line"},
-      h("span",{class:"pill",text:k.label || "Key"}),
-      who ? h("span",null, nameEl(who,"span"), who===uid ? h("span",{class:"note",text:" (you)"}) : null) : h("span",{class:"note",text:"unused"}),
-      who && who !== uid ? h("button",{class:"tiny",type:"button",style:"margin-left:auto",text:"Free up",onclick:async ev => {
-        const b = ev.currentTarget; if (b.dataset.sure !== "1"){ b.dataset.sure = "1"; b.textContent = "Sure? Click again"; return; }
-        b.disabled = true; try { await D.freeKey(k.hash, who); } catch(e){ b.disabled = false; b.textContent = "Failed, retry"; writeErr(e); }
+      h("span",{class:"pill",text:keyLabel(k.label)}),
+      who ? h("span",null, nameEl(who,"span"), who===uid ? h("span",{class:"note",text:" (tu)"}) : null) : h("span",{class:"note",text:"nefolosită"}),
+      who && who !== uid ? h("button",{class:"tiny",type:"button",style:"margin-left:auto",text:"Eliberează",onclick:async ev => {
+        const b = ev.currentTarget; if (b.dataset.sure !== "1"){ b.dataset.sure = "1"; b.textContent = "Sigur? Apasă iar"; return; }
+        b.disabled = true; try { await D.freeKey(k.hash, who); } catch(e){ b.disabled = false; b.textContent = "Eroare, reîncearcă"; writeErr(e); }
       }}) : null,
-      !who && !k.admin ? h("button",{class:"tiny",type:"button",style:"margin-left:auto",text:"Delete key",onclick:async ev => {
-        const b = ev.currentTarget; if (b.dataset.sure !== "1"){ b.dataset.sure = "1"; b.textContent = "Sure? Click again"; return; }
+      !who && !k.admin ? h("button",{class:"tiny",type:"button",style:"margin-left:auto",text:"Șterge cheia",onclick:async ev => {
+        const b = ev.currentTarget; if (b.dataset.sure !== "1"){ b.dataset.sure = "1"; b.textContent = "Sigur? Apasă iar"; return; }
         b.disabled = true; try { await D.deleteKey(k.hash); } catch(e){ b.disabled = false; writeErr(e); }
       }}) : null);
   }));
