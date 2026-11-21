@@ -11,3 +11,6 @@ export const FIREBASE_CONFIG = {
 
 // The owner's Google email. Must match the email in firestore.rules.
 export const OWNER_EMAIL = "ghiurcutadragosgamer@gmail.com";
+
+// Free GIF search key from partner.klipy.com (leave empty to disable GIF search).
+export const KLIPY_KEY = "";
