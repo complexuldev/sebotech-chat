@@ -91,27 +91,54 @@ export function saveProfile(p){
 
 // ---------- chat (rate-limited: each write also stamps limits/{uid}) ----------
 export function watchChat(cb, err){ return onSnapshot(query(collection(db, "chat"), orderBy("ts", "desc"), limit(200)), s => cb(rows(s), s.metadata.fromCache), err); }
-export async function sendChat(text){
+// Attachments: att = { img:{data,w,h} } (stored in images/{id}) or { gif:{url,w,h} }.
+function addAtt(b, body, att, kind){
+  if (att && att.img){
+    const ref = doc(collection(db, "images"));
+    b.set(ref, { uid, kind, data: att.img.data, w: att.img.w|0, h: att.img.h|0, ts: serverTimestamp() });
+    body.img = ref.id;
+  }
+  if (att && att.gif) body.gif = { url: att.gif.url, w: att.gif.w|0, h: att.gif.h|0 };
+  return body;
+}
+export async function sendChat(text, att){
   const b = writeBatch(db);
-  b.set(doc(collection(db, "chat")), { uid, text, ts: serverTimestamp() });
+  b.set(doc(collection(db, "chat")), addAtt(b, { uid, text, ts: serverTimestamp() }, att, "chat"));
   b.set(limitsRef(), { t: serverTimestamp() });
   await b.commit();
 }
-export function deleteChat(id){ return deleteDoc(doc(db, "chat", id)); }
+export async function deleteChat(id, img){
+  const b = writeBatch(db);
+  b.delete(doc(db, "chat", id));
+  if (img) b.delete(doc(db, "images", img));
+  await b.commit();
+}
+const imgCache = new Map();
+export function getImage(id){
+  if (!imgCache.has(id)) imgCache.set(id, getDoc(doc(db, "images", id)).then(s => s.exists() ? s.data().data : null).catch(() => { imgCache.delete(id); return null; }));
+  return imgCache.get(id);
+}
 export async function pruneChat(days){
   const old = await getDocs(query(collection(db, "chat"), where("ts", "<", new Date(Date.now() - days * 86400000)), limit(100)));
   for (const d of old.docs) await deleteDoc(d.ref);
+  const oldImgs = await getDocs(query(collection(db, "images"), where("ts", "<", new Date(Date.now() - days * 86400000)), limit(50)));
+  for (const d of oldImgs.docs) if (d.data().kind === "chat") await deleteDoc(d.ref);
 }
 
 // ---------- feed ----------
 export function watchPosts(cb, err){ return onSnapshot(query(collection(db, "posts"), orderBy("ts", "desc"), limit(150)), s => cb(rows(s), s.metadata.fromCache), err); }
-export async function createPost(text){
+export async function createPost(text, att){
   const b = writeBatch(db);
-  b.set(doc(collection(db, "posts")), { uid, text, ts: serverTimestamp(), reactions: {}, replyCount: 0 });
+  b.set(doc(collection(db, "posts")), addAtt(b, { uid, text, ts: serverTimestamp(), reactions: {}, replyCount: 0 }, att, "post"));
   b.set(limitsRef(), { t: serverTimestamp() });
   await b.commit();
 }
-export function deletePost(id){ return deleteDoc(doc(db, "posts", id)); }
+export async function deletePost(id, img){
+  const b = writeBatch(db);
+  b.delete(doc(db, "posts", id));
+  if (img) b.delete(doc(db, "images", img));
+  await b.commit();
+}
 export function react(postId, key, on){ return updateDoc(doc(db, "posts", postId), { ["reactions." + key + "_" + uid]: on ? true : deleteField() }); }
 export function watchReplies(postId, cb){ return onSnapshot(query(collection(db, "posts", postId, "replies"), orderBy("ts", "asc"), limit(200)), s => cb(rows(s)), () => {}); }
 export async function addReply(postId, text){
