@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SeboTECH CHAT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#07080f; --panel:#0f1220; --panel2:#161a2e; --panel3:#1d2240; --line:#252b4d;
+    --text:#eef1ff; --muted:#8f97c2; --accent:#00e5ff; --accent2:#a855f7; --gold:#ffd23f; --red:#ff4d6d; --green:#3ef08a; --orange:#ff9f43;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:
+      radial-gradient(1000px 500px at 85% -10%,rgba(168,85,247,.22),transparent 60%),
+      radial-gradient(800px 500px at -10% 110%,rgba(0,229,255,.14),transparent 55%),
+      linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px) 0 0/100% 28px,
+      var(--bg);
+    color:var(--text);font:15px/1.45 Inter,system-ui,sans-serif;min-height:100vh}
+  .tech{font-family:"Chakra Petch",Inter,sans-serif;letter-spacing:.4px}
+  button{font:inherit;cursor:pointer;border-radius:10px;padding:9px 14px;background:var(--panel2);color:var(--text);border:1px solid var(--line);font-weight:600}
+  button:hover:not(:disabled){border-color:var(--accent)}
+  button:disabled{opacity:.4;cursor:default}
+  button.primary{background:linear-gradient(90deg,var(--accent2),#5b6cff 60%,var(--accent));border:none;color:#fff}
+  button.ghost{background:transparent}
+  button.tiny{padding:4px 9px;font-size:13px;border-radius:8px}
+  button.link{background:none;border:none;padding:0;color:var(--muted);font-weight:500;font-size:13px}
+  button.link:hover{color:var(--accent)}
+  input,textarea,select{font:inherit;color:var(--text);background:#090b16;border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+  textarea{resize:vertical;min-height:70px}
+  label{display:block;font-size:12px;color:var(--muted);margin:14px 0 6px;font-weight:700;text-transform:uppercase;letter-spacing:.7px}
+  .hidden{display:none !important}
+  .note{color:var(--muted);font-size:13px}
+  .err{color:var(--red);font-size:13px;margin-top:10px;min-height:1em}
+  .row{display:flex;gap:10px;align-items:center}
+  .grow{flex:1;min-width:0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+  .h2{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:13px;color:var(--muted);letter-spacing:1.2px;text-transform:uppercase;margin:0 0 12px}
+  .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--panel3);color:var(--muted);font-weight:700;white-space:nowrap}
+  .pill.lfg{background:rgba(62,240,138,.14);color:var(--green)}
+  .av{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;font-size:20px;background:var(--panel3);flex:none;position:relative;border:2px solid transparent}
+  .av.sm{width:28px;height:28px;font-size:15px;border-radius:9px}
+  .av.lg{width:84px;height:84px;font-size:46px;border-radius:24px;border-width:3px}
+  .av .dot{position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;border-radius:50%;background:var(--green);border:2px solid var(--panel)}
+  .spinner{width:28px;height:28px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:sp .9s linear infinite;margin:80px auto 12px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* shell */
+  .top{position:sticky;top:0;z-index:20;background:rgba(7,8,15,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .top .in{max-width:1080px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:16px}
+  .logo{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:20px;letter-spacing:1px;white-space:nowrap}
+  .logo .a{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .logo .b{color:var(--text);opacity:.9}
+  nav.tabs{display:flex;gap:4px;flex:1}
+  nav.tabs a{color:var(--muted);text-decoration:none;font-weight:600;padding:8px 12px;border-radius:10px;display:flex;align-items:center;gap:6px;position:relative}
+  nav.tabs a:hover{color:var(--text);background:var(--panel2)}
+  nav.tabs a.on{color:var(--text);background:var(--panel2);box-shadow:inset 0 -2px 0 var(--accent)}
+  .badge{background:var(--red);color:#fff;font-size:11px;font-weight:700;border-radius:999px;padding:0 6px;min-width:18px;text-align:center;line-height:18px}
+  .mechip{display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--panel);border:1px solid var(--line);padding:4px 12px 4px 4px;border-radius:12px;font-weight:600}
+  main{max-width:1080px;margin:0 auto;padding:18px 16px 90px}
+  .banner{background:#1c1636;border:1px solid #4b3a7a;padding:10px 12px;border-radius:12px;font-size:13px;margin-bottom:14px}
+  .banner.warn{background:#2e1520;border-color:#7a3a4b}
+  @media (max-width:760px){
+    nav.tabs{position:fixed;left:0;right:0;bottom:0;background:rgba(10,12,22,.96);border-top:1px solid var(--line);justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom));z-index:30}
+    nav.tabs a{flex-direction:column;gap:2px;font-size:11px;padding:6px 8px}
+    nav.tabs a .ico{font-size:18px}
+    nav.tabs a.on{box-shadow:none;color:var(--accent)}
+    nav.tabs a .badge{position:absolute;top:0;right:2px}
+    .top{backdrop-filter:none;background:rgba(7,8,15,.97)}
+    .top .in{justify-content:space-between}
+    .online-card{padding:10px 12px}
+    .online-card .pill,#offlineHead,#offlineList{display:none}
+    .online-card .h2{margin-bottom:6px}
+    .mechip .nm{display:none}
+  }
+
+  /* gate */
+  .gate{max-width:460px;margin:30px auto}
+  .gate .logo{font-size:30px;text-align:center;margin-bottom:6px}
+  .emojis{display:flex;flex-wrap:wrap;gap:6px}
+  .emojis button{font-size:20px;padding:6px 9px}
+  .emojis button.on,.swatches button.on,.banners button.on{outline:2px solid var(--accent);outline-offset:1px}
+  .swatches,.banners{display:flex;flex-wrap:wrap;gap:8px}
+  .swatches button{width:32px;height:32px;border-radius:50%;padding:0;border:2px solid var(--panel)}
+  .banners button{width:64px;height:36px;border-radius:10px;padding:0;border:none}
+
+  /* chat */
+  .chat-layout{display:grid;grid-template-columns:1fr 240px;gap:14px}
+  @media (max-width:760px){.chat-layout{grid-template-columns:1fr}.online-card{order:-1}}
+  .chatbox{display:flex;flex-direction:column;height:calc(100vh - 170px);min-height:420px;padding:0;overflow:hidden}
+  @media (max-width:760px){.chatbox{height:calc(100vh - 250px);min-height:340px}}
+  .msgs{flex:1;overflow-y:auto;padding:14px 16px}
+  .msg{display:flex;gap:10px;padding:2px 0}
+  .msg.first{margin-top:12px}
+  .msg .gutter{width:36px;flex:none}
+  .msg .who{display:flex;gap:8px;align-items:baseline;font-size:13px;color:var(--muted)}
+  .msg .who b{font-size:14px;cursor:pointer}
+  .msg .who b:hover{text-decoration:underline}
+  .msg .txt{white-space:pre-wrap;word-wrap:break-word}
+  .msg:hover .mdel{visibility:visible}
+  .mdel{visibility:hidden;margin-left:6px}
+  .mention{color:var(--accent);font-weight:600;background:rgba(0,229,255,.08);border-radius:4px;padding:0 2px}
+  .msg.mine-mention .txt{background:rgba(0,229,255,.06);border-left:2px solid var(--accent);padding-left:8px;border-radius:4px}
+  .daysep{text-align:center;margin:16px 0 6px;font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.8px;text-transform:uppercase}
+  .daysep span{background:var(--panel);padding:0 10px}
+  .daysep{background:linear-gradient(var(--line),var(--line)) center/100% 1px no-repeat}
+  .composer{border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:8px;align-items:flex-end;background:var(--panel)}
+  .composer textarea{min-height:44px;max-height:140px;resize:none}
+  .typing{font-size:12px;color:var(--muted);padding:0 16px 6px;min-height:20px}
+  .online-card .person{display:flex;align-items:center;gap:10px;padding:6px;border-radius:10px;cursor:pointer}
+  .online-card .person:hover{background:var(--panel2)}
+  .online-card .person .st{font-size:12px;color:var(--muted)}
+  @media (max-width:760px){.online-card .list{display:flex;gap:8px;overflow-x:auto}.online-card .person .meta{display:none}}
+
+  /* feed */
+  .feedwrap{max-width:680px;margin:0 auto}
+  .post{padding:16px}
+  .post .meta{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  .post .meta b{color:var(--text);font-size:15px;cursor:pointer}
+  .post .meta b:hover{text-decoration:underline}
+  .post .text{white-space:pre-wrap;word-wrap:break-word;margin:6px 0 0;font-size:15.5px}
+  .reacts{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;align-items:center}
+  .reacts button{padding:4px 10px;font-size:13px;border-radius:999px;font-weight:500}
+  .reacts button.on{border-color:var(--accent);background:rgba(0,229,255,.1)}
+  .replies{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+  .reply{display:flex;gap:8px;padding:6px 0;font-size:14px}
+  .reply b{cursor:pointer}
+  .reply .rt{white-space:pre-wrap;word-wrap:break-word}
+  .empty{color:var(--muted);text-align:center;padding:28px 0}
+
+  /* squad */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+  .pcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;cursor:pointer;transition:transform .12s,border-color .12s}
+  .pcard:hover{transform:translateY(-2px);border-color:var(--accent)}
+  .pcard .bn{height:64px}
+  .pcard .bd{padding:0 14px 14px;margin-top:-26px}
+  .pcard .bd .av{width:56px;height:56px;font-size:30px;border-radius:16px;border-width:3px;border-color:var(--panel)}
+  .pcard .nm{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:18px;margin-top:6px}
+  .pcard .bio{color:var(--muted);font-size:13px;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}
+  .pcard .mini{display:flex;gap:12px;margin-top:10px;font-size:13px;color:var(--muted)}
+  .pcard .mini b{color:var(--text)}
+
+  /* profile modal */
+  .overlay{position:fixed;inset:0;background:rgba(3,4,10,.72);z-index:50;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 14px}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:20px;width:100%;max-width:560px;overflow:hidden;position:relative}
+  .modal .bn{height:120px}
+  .modal .close{position:absolute;top:10px;right:10px;background:rgba(0,0,0,.45);border:none;width:34px;height:34px;padding:0;border-radius:50%}
+  .modal .bd{padding:0 20px 20px;margin-top:-44px}
+  .modal .av.lg{border-color:var(--panel)}
+  .modal .nm{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:26px;margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+  .fact{background:var(--panel2);border-radius:12px;padding:10px 12px}
+  .fact .k{font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.7px;text-transform:uppercase}
+  .fact .v{font-weight:600;margin-top:2px;word-wrap:break-word}
+
+  /* stats */
+  .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  @media (max-width:560px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:var(--panel2);border-radius:12px;padding:12px 8px;text-align:center}
+  .stat .n{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:28px;line-height:1.1}
+  .stat .k{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.7px}
+  .stat .ctl{display:flex;justify-content:center;gap:6px;margin-top:8px}
+  .c-wins{color:var(--gold)} .c-kills{color:var(--red)} .c-chests{color:var(--orange)} .c-matches{color:var(--accent)}
+  .daynav{display:flex;align-items:center;gap:8px}
+  .daynav .label{flex:1;text-align:center;font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:18px}
+  .daynav .label small{display:block;font-family:Inter;font-weight:500;font-size:12px;color:var(--muted)}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:760px){.two{grid-template-columns:1fr}}
+  table.lb{width:100%;border-collapse:collapse;font-size:14px}
+  table.lb th{text-align:right;font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:4px 6px}
+  table.lb th:first-child,table.lb td:first-child{text-align:left}
+  table.lb td{padding:7px 6px;border-top:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}
+  table.lb td.who{display:flex;align-items:center;gap:8px;cursor:pointer}
+  table.lb tr.me td{background:rgba(0,229,255,.05)}
+
+  /* me */
+  .me-layout{display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start}
+  @media (max-width:860px){.me-layout{grid-template-columns:1fr}}
+  .preview{position:sticky;top:76px}
+  .keys .line{display:flex;align-items:center;gap:8px;padding:7px 0;font-size:14px;border-top:1px solid var(--line)}
+  .keys .line:first-of-type{border-top:none}
+</style>
+</head>
+<body>
+
+<div id="loading" style="text-align:center"><div class="spinner"></div><div class="note" id="loadingMsg">Booting SeboTECH CHAT…</div></div>
+
+<div id="signin" class="gate hidden">
+  <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
+  <p class="note" style="text-align:center;margin:0 0 16px">Invite only. Sign in, then use your access key.</p>
+  <div class="card" style="text-align:center">
+    <button class="primary" type="button" id="signInBtn" style="width:100%">Sign in with Google</button>
+    <div class="err" id="signInErr"></div>
+  </div>
+</div>
+
+<div id="setup" class="gate hidden">
+  <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
+  <div class="card">
+    <div class="h2">First-time setup</div>
+    <div id="setupBody">
+      <p class="note" style="margin-top:0">You're the owner. This creates your 5 access keys. Key 1 is your owner key and gives you admin powers.</p>
+      <button class="primary" type="button" id="setupBtn" style="width:100%">Create my 5 keys</button>
+    </div>
+    <div class="err" id="setupErr"></div>
+  </div>
+</div>
+
+<div id="gate" class="gate hidden">
+  <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
+  <p class="note" style="text-align:center;margin:0 0 16px">Invite only. Enter your key to make your profile.</p>
+  <div class="card">
+    <form id="gateForm" autocomplete="off">
+      <label for="keyIn" style="margin-top:0">Access key</label>
+      <input id="keyIn" placeholder="SEBO-XXXX-XXXX-XXXX" spellcheck="false" style="text-transform:uppercase;letter-spacing:1px">
+      <label for="tagIn">Gamertag</label>
+      <input id="tagIn" maxlength="24" placeholder="What the squad calls you">
+      <label for="platIn">Platform</label>
+      <select id="platIn"></select>
+      <label>Icon</label>
+      <div class="emojis" id="gateEmoji"></div>
+      <div style="margin-top:18px"><button class="primary" type="submit" id="gateBtn" style="width:100%">Enter SeboTECH CHAT</button></div>
+      <div class="err" id="gateErr"></div>
+      <p class="note" style="margin:12px 0 0;text-align:center">Signed in as <span id="gateEmail"></span> · <button class="link" type="button" id="gateSignOut">Sign out</button></p>
+    </form>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <div class="top"><div class="in">
+    <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
+    <nav class="tabs" id="tabs">
+      <a href="#chat" data-v="chat"><span class="ico">💬</span><span>Chat</span><span class="badge hidden" id="chatBadge"></span></a>
+      <a href="#feed" data-v="feed"><span class="ico">📰</span><span>Feed</span></a>
+      <a href="#squad" data-v="squad"><span class="ico">👥</span><span>Squad</span></a>
+      <a href="#stats" data-v="stats"><span class="ico">📊</span><span>Stats</span></a>
+      <a href="#me" data-v="me"><span class="ico">⚙️</span><span>Profile</span></a>
+    </nav>
+    <div class="mechip" id="meChip" title="Your profile"></div>
+  </div></div>
+
+  <main>
+    <div id="banner" class="banner hidden"></div>
+
+    <!-- CHAT -->
+    <section id="v-chat" class="view">
+      <div class="chat-layout">
+        <div class="card chatbox">
+          <div class="msgs" id="msgs"></div>
+          <div class="typing" id="typing"></div>
+          <form class="composer" id="chatForm">
+            <textarea id="chatIn" rows="1" maxlength="1000" placeholder="Message the squad…  (@name to ping)"></textarea>
+            <button class="primary" type="submit" id="chatBtn">Send</button>
+          </form>
+        </div>
+        <div class="card online-card">
+          <div class="h2">Online now · <span id="onlineCount">0</span></div>
+          <div class="list" id="onlineList"></div>
+          <div class="h2" id="offlineHead" style="margin-top:16px">Offline</div>
+          <div class="list" id="offlineList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEED -->
+    <section id="v-feed" class="view hidden">
+      <div class="feedwrap">
+        <div class="card">
+          <form id="postForm">
+            <div class="row" style="align-items:flex-start">
+              <div class="av" id="postAv"></div>
+              <textarea class="grow" id="postIn" maxlength="1200" placeholder="Post today's grind: clutch moments, loadouts, rage quits…"></textarea>
+            </div>
+            <div class="row" style="margin-top:10px;justify-content:flex-end">
+              <span class="note grow" id="postCount"></span>
+              <button class="primary" type="submit" id="postBtn">Post</button>
+            </div>
+          </form>
+        </div>
+        <div id="feedList"></div>
+      </div>
+    </section>
+
+    <!-- SQUAD -->
+    <section id="v-squad" class="view hidden">
+      <div class="h2">The squad</div>
+      <div class="grid" id="squadGrid"></div>
+    </section>
+
+    <!-- STATS -->
+    <section id="v-stats" class="view hidden">
+      <div class="card daynav">
+        <button class="ghost" id="prevDay" aria-label="Previous day">◀</button>
+        <div class="label" id="dayLabel"></div>
+        <button class="ghost" id="nextDay" aria-label="Next day">▶</button>
+      </div>
+      <div class="card">
+        <div class="h2">My stats for this day</div>
+        <div class="stats-grid" id="myStats"></div>
+      </div>
+      <div class="two">
+        <div class="card"><div class="h2" id="dayLbTitle">Day leaderboard</div><div id="dayLb"></div></div>
+        <div class="card"><div class="h2">All-time leaderboard</div><div id="allLb"></div></div>
+      </div>
+    </section>
+
+    <!-- ME -->
+    <section id="v-me" class="view hidden">
+      <div class="me-layout">
+        <div class="card">
+          <div class="h2">Customize your profile</div>
+          <form id="meForm" autocomplete="off">
+            <label for="mTag" style="margin-top:0">Gamertag</label>
+            <input id="mTag" maxlength="24">
+            <label for="mBio">Bio</label>
+            <textarea id="mBio" maxlength="200" placeholder="Tell the squad about yourself"></textarea>
+            <div class="two" style="gap:10px">
+              <div><label for="mPlat">Platform</label><select id="mPlat"></select></div>
+              <div><label for="mMode">Favorite mode</label><select id="mMode"></select></div>
+              <div><label for="mDrop">Go-to drop spot</label><input id="mDrop" maxlength="40" placeholder="Where you land"></div>
+              <div><label for="mMain">Main loadout</label><input id="mMain" maxlength="40" placeholder="e.g. AR + shotgun"></div>
+            </div>
+            <label for="mStatus">Status</label>
+            <input id="mStatus" maxlength="60" placeholder="e.g. grinding ranked till 2am">
+            <label class="row" style="text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);gap:8px;cursor:pointer">
+              <input type="checkbox" id="mLfg" style="width:auto"> Looking for a squad (shows an LFG badge)
+            </label>
+            <label>Icon</label>
+            <div class="emojis" id="mEmoji"></div>
+            <label>Accent color</label>
+            <div class="swatches" id="mColor"></div>
+            <label>Banner</label>
+            <div class="banners" id="mBanner"></div>
+            <div class="row" style="margin-top:18px">
+              <button class="primary" type="submit" id="meSave">Save profile</button>
+              <span class="note" id="meMsg"></span>
+            </div>
+          </form>
+        </div>
+        <div class="preview">
+          <div class="h2">Preview</div>
+          <div id="mePreview"></div>
+        </div>
+      </div>
+      <div class="card keys hidden" id="keysCard" style="max-width:640px">
+        <div class="h2">Access keys · admin only</div>
+        <p class="note" style="margin-top:0">Keys are stored scrambled, so the database can't show them again. Copy a new key when you make it. Freeing a key removes that person and lets the key be used again.</p>
+        <div id="keysList"></div>
+        <form class="row" id="newKeyForm" style="margin-top:12px">
+          <input id="newKeyLabel" maxlength="40" placeholder="Label, e.g. Key for Andrei">
+          <button type="submit" class="tiny" style="white-space:nowrap;padding:9px 12px">New key</button>
+        </form>
+        <div id="newKeyOut"></div>
+      </div>
+      <div style="max-width:640px;margin-top:4px"><button type="button" id="signOutBtn">Sign out</button></div>
+    </section>
+  </main>
+</div>
+
+<div id="overlay" class="overlay hidden"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
