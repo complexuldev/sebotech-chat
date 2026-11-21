@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ro">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
@@ -8,7 +8,7 @@
 <title>SeboTECH CHAT</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@500;700;800;900&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#07080f; --panel:#0f1220; --panel2:#161a2e; --panel3:#1d2240; --line:#252b4d;
@@ -21,8 +21,8 @@
       radial-gradient(800px 500px at -10% 110%,rgba(0,229,255,.14),transparent 55%),
       linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px) 0 0/100% 28px,
       var(--bg);
-    color:var(--text);font:15px/1.45 Inter,system-ui,sans-serif;min-height:100vh}
-  .tech{font-family:"Chakra Petch",Inter,sans-serif;letter-spacing:.4px}
+    color:var(--text);font:15px/1.45 Nunito,system-ui,sans-serif;min-height:100vh}
+  .tech{font-family:"Lilita One",Inter,sans-serif;letter-spacing:.4px}
   button{font:inherit;cursor:pointer;border-radius:10px;padding:9px 14px;background:var(--panel2);color:var(--text);border:1px solid var(--line);font-weight:600}
   button:hover:not(:disabled){border-color:var(--accent)}
   button:disabled{opacity:.4;cursor:default}
@@ -41,7 +41,7 @@
   .row{display:flex;gap:10px;align-items:center}
   .grow{flex:1;min-width:0}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
-  .h2{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:13px;color:var(--muted);letter-spacing:1.2px;text-transform:uppercase;margin:0 0 12px}
+  .h2{font-family:"Lilita One",sans-serif;font-weight:700;font-size:13px;color:var(--muted);letter-spacing:1.2px;text-transform:uppercase;margin:0 0 12px}
   .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--panel3);color:var(--muted);font-weight:700;white-space:nowrap}
   .pill.lfg{background:rgba(62,240,138,.14);color:var(--green)}
   .av{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;font-size:20px;background:var(--panel3);flex:none;position:relative;border:2px solid transparent}
@@ -54,7 +54,7 @@
   /* shell */
   .top{position:sticky;top:0;z-index:20;background:rgba(7,8,15,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
   .top .in{max-width:1080px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:16px}
-  .logo{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:20px;letter-spacing:1px;white-space:nowrap}
+  .logo{font-family:"Lilita One",sans-serif;font-weight:700;font-size:20px;letter-spacing:1px;white-space:nowrap}
   .logo .a{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
   .logo .b{color:var(--text);opacity:.9}
   nav.tabs{display:flex;gap:4px;flex:1}
@@ -141,7 +141,7 @@
   .pcard .bn{height:64px}
   .pcard .bd{padding:0 14px 14px;margin-top:-26px}
   .pcard .bd .av{width:56px;height:56px;font-size:30px;border-radius:16px;border-width:3px;border-color:var(--panel)}
-  .pcard .nm{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:18px;margin-top:6px}
+  .pcard .nm{font-family:"Lilita One",sans-serif;font-weight:700;font-size:18px;margin-top:6px}
   .pcard .bio{color:var(--muted);font-size:13px;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}
   .pcard .mini{display:flex;gap:12px;margin-top:10px;font-size:13px;color:var(--muted)}
   .pcard .mini b{color:var(--text)}
@@ -153,7 +153,7 @@
   .modal .close{position:absolute;top:10px;right:10px;background:rgba(0,0,0,.45);border:none;width:34px;height:34px;padding:0;border-radius:50%}
   .modal .bd{padding:0 20px 20px;margin-top:-44px}
   .modal .av.lg{border-color:var(--panel)}
-  .modal .nm{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:26px;margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .modal .nm{font-family:"Lilita One",sans-serif;font-weight:700;font-size:26px;margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
   .fact{background:var(--panel2);border-radius:12px;padding:10px 12px}
   .fact .k{font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.7px;text-transform:uppercase}
@@ -163,13 +163,13 @@
   .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
   @media (max-width:560px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
   .stat{background:var(--panel2);border-radius:12px;padding:12px 8px;text-align:center}
-  .stat .n{font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:28px;line-height:1.1}
+  .stat .n{font-family:"Lilita One",sans-serif;font-weight:700;font-size:28px;line-height:1.1}
   .stat .k{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.7px}
   .stat .ctl{display:flex;justify-content:center;gap:6px;margin-top:8px}
   .c-wins{color:var(--gold)} .c-kills{color:var(--red)} .c-chests{color:var(--orange)} .c-matches{color:var(--accent)}
   .daynav{display:flex;align-items:center;gap:8px}
-  .daynav .label{flex:1;text-align:center;font-family:"Chakra Petch",sans-serif;font-weight:700;font-size:18px}
-  .daynav .label small{display:block;font-family:Inter;font-weight:500;font-size:12px;color:var(--muted)}
+  .daynav .label{flex:1;text-align:center;font-family:"Lilita One",sans-serif;font-weight:700;font-size:18px}
+  .daynav .label small{display:block;font-family:Nunito;font-weight:500;font-size:12px;color:var(--muted)}
   .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   @media (max-width:760px){.two{grid-template-columns:1fr}}
   table.lb{width:100%;border-collapse:collapse;font-size:14px}
@@ -185,17 +185,98 @@
   .preview{position:sticky;top:76px}
   .keys .line{display:flex;align-items:center;gap:8px;padding:7px 0;font-size:14px;border-top:1px solid var(--line)}
   .keys .line:first-of-type{border-top:none}
+
+  /* ================= FUN THEME ================= */
+  :root{
+    --bg:#1a0b3d; --panel:#2a1466; --panel2:#3a1f86; --panel3:#4a2aa3; --line:#120632;
+    --text:#ffffff; --muted:#c9b8ff; --accent:#3ef0ff; --accent2:#ff5fa2; --gold:#ffd23f; --red:#ff4d6d; --green:#9dff3b; --orange:#ff9f43;
+    --ink:#120632;
+  }
+  body{background:
+      radial-gradient(circle at 12% 18%, rgba(255,255,255,.10) 0 2px, transparent 3px) 0 0/46px 46px,
+      radial-gradient(circle at 70% 60%, rgba(255,210,63,.10) 0 2px, transparent 3px) 0 0/70px 70px,
+      linear-gradient(165deg,#3b1287 0%,#5b1fb8 35%,#2d5fe0 75%,#18b4e8 100%) fixed;
+    font-weight:700;}
+  .card{border:3px solid var(--ink);border-radius:22px;box-shadow:0 6px 0 var(--ink);background:var(--panel)}
+  button{border:3px solid var(--ink);border-radius:14px;box-shadow:0 4px 0 var(--ink);font-weight:800;transition:transform .08s, box-shadow .08s}
+  button:hover:not(:disabled){border-color:var(--ink);transform:translateY(-1px);box-shadow:0 5px 0 var(--ink)}
+  button:active:not(:disabled){transform:translateY(3px);box-shadow:0 1px 0 var(--ink)}
+  button.primary{background:var(--gold);color:var(--ink);border:3px solid var(--ink);font-family:"Lilita One",sans-serif;font-weight:400;letter-spacing:.5px;font-size:16px}
+  button.link,button.ghost{box-shadow:none;border:none}
+  button.link:hover{transform:none;box-shadow:none}
+  button.tiny{border-width:2px;box-shadow:0 3px 0 var(--ink);border-radius:10px}
+  input,textarea,select{background:#1b0c47;border:3px solid var(--ink);border-radius:14px;font-weight:700}
+  input:focus,textarea:focus,select:focus{outline:3px solid var(--gold)}
+  label{color:var(--gold);font-weight:900}
+  .h2{font-family:"Lilita One",sans-serif;font-weight:400;color:var(--gold);font-size:17px;letter-spacing:.5px;text-transform:none}
+  .logo{font-family:"Lilita One",sans-serif;font-weight:400;font-size:26px;letter-spacing:.5px;transform:rotate(-2deg);display:inline-block}
+  .logo .a{background:none;-webkit-background-clip:initial;background-clip:initial;color:var(--gold);text-shadow:3px 3px 0 var(--ink)}
+  .logo .b{color:#fff;opacity:1;background:var(--accent2);padding:0 8px;border-radius:10px;border:3px solid var(--ink);box-shadow:0 3px 0 var(--ink);text-shadow:2px 2px 0 var(--ink);display:inline-block;transform:rotate(3deg)}
+  .gate .logo{font-size:40px;display:block;text-align:center;margin-bottom:12px}
+  .gate .logo::after{content:" 🎮";display:inline-block;animation:bob 1.6s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0) rotate(-8deg)}50%{transform:translateY(-6px) rotate(8deg)}}
+  .top{background:rgba(26,11,61,.88);border-bottom:3px solid var(--ink)}
+  nav.tabs a{color:#e8ddff;font-weight:900;border:3px solid transparent;border-radius:14px}
+  nav.tabs a:hover{background:var(--panel2);color:#fff}
+  nav.tabs a.on{background:var(--gold);color:var(--ink);border-color:var(--ink);box-shadow:0 3px 0 var(--ink)}
+  .mechip{border:3px solid var(--ink);box-shadow:0 3px 0 var(--ink);border-radius:14px;background:var(--panel2)}
+  .pill{background:var(--panel3);color:#fff;border:2px solid var(--ink);font-weight:900}
+  .pill.lfg{background:var(--green);color:var(--ink)}
+  .av{background:#fff;border:3px solid var(--ink) !important;box-shadow:0 3px 0 var(--ink);border-radius:14px}
+  .av .dot{background:var(--green);border:2px solid var(--ink)}
+  .banner{background:var(--gold);color:var(--ink);border:3px solid var(--ink);box-shadow:0 4px 0 var(--ink);font-weight:900}
+  .banner.warn{background:var(--red);color:#fff}
+  .note{color:var(--muted)}
+  /* chat bubbles */
+  .chatbox{background:#22105a}
+  .msg .txt{display:inline-block;max-width:100%;background:var(--panel2);border:2px solid var(--ink);padding:6px 12px;border-radius:16px 16px 16px 4px;margin-top:2px}
+  .msg .gutter + .grow .txt{margin-top:0}
+  .msg.mine-mention .txt{background:#4b1f6e;border-left:2px solid var(--ink);border-color:var(--accent2);padding-left:12px}
+  .mention{color:var(--ink);background:var(--accent);border-radius:6px;padding:0 4px}
+  .daysep span{background:var(--gold);color:var(--ink);border:2px solid var(--ink);border-radius:999px;padding:2px 12px}
+  .daysep{background:linear-gradient(var(--ink),var(--ink)) center/100% 2px no-repeat}
+  .composer{background:var(--panel);border-top:3px solid var(--ink)}
+  .typing{color:var(--gold)}
+  /* feed */
+  .post .text{font-size:16px;font-weight:700}
+  .reacts button{border-width:2px;box-shadow:0 3px 0 var(--ink)}
+  .reacts button.on{background:var(--accent);color:var(--ink);border-color:var(--ink)}
+  /* squad cards */
+  .pcard{border:3px solid var(--ink);border-radius:22px;box-shadow:0 6px 0 var(--ink)}
+  .pcard:hover{transform:translateY(-4px) rotate(-1deg);border-color:var(--ink)}
+  .pcard:nth-child(even):hover{transform:translateY(-4px) rotate(1deg)}
+  .pcard .bd .av{border-color:var(--ink)}
+  .pcard .nm,.modal .nm{font-family:"Lilita One",sans-serif;font-weight:400;text-shadow:2px 2px 0 var(--ink)}
+  .modal{border:3px solid var(--ink);box-shadow:0 8px 0 var(--ink);border-radius:24px}
+  .modal .close{border:2px solid var(--ink)}
+  .fact{background:var(--panel2);border:2px solid var(--ink)}
+  .fact .k{color:var(--gold)}
+  /* stats */
+  .stat{background:var(--panel2);border:3px solid var(--ink);box-shadow:0 4px 0 var(--ink);border-radius:18px}
+  .stat .n{font-family:"Lilita One",sans-serif;font-weight:400;font-size:34px;text-shadow:2px 2px 0 var(--ink)}
+  .c-matches{color:var(--accent)}
+  .daynav .label{font-family:"Lilita One",sans-serif;font-weight:400;font-size:22px}
+  table.lb th{color:var(--gold)}
+  table.lb td{border-top:2px solid rgba(18,6,50,.6)}
+  table.lb tr.me td{background:rgba(255,210,63,.12)}
+  .spinner{border:5px solid var(--panel2);border-top-color:var(--gold)}
+  .emojis button.on,.swatches button.on,.banners button.on{outline:3px solid var(--gold)}
+  @media (max-width:760px){
+    nav.tabs{background:rgba(26,11,61,.97);border-top:3px solid var(--ink)}
+    nav.tabs a.on{color:var(--ink)}
+    .logo{font-size:22px}
+  }
 </style>
 </head>
 <body>
 
-<div id="loading" style="text-align:center"><div class="spinner"></div><div class="note" id="loadingMsg">Booting SeboTECH CHAT…</div></div>
+<div id="loading" style="text-align:center"><div class="spinner"></div><div class="note" id="loadingMsg">Se încarcă SeboTECH CHAT…</div></div>
 
 <div id="signin" class="gate hidden">
   <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
-  <p class="note" style="text-align:center;margin:0 0 16px">Invite only. Sign in, then use your access key.</p>
+  <p class="note" style="text-align:center;margin:0 0 16px">Doar cu invitație 🎟️ Conectează-te, apoi folosește cheia de acces.</p>
   <div class="card" style="text-align:center">
-    <button class="primary" type="button" id="signInBtn" style="width:100%">Sign in with Google</button>
+    <button class="primary" type="button" id="signInBtn" style="width:100%">Conectează-te cu Google</button>
     <div class="err" id="signInErr"></div>
   </div>
 </div>
@@ -203,10 +284,10 @@
 <div id="setup" class="gate hidden">
   <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
   <div class="card">
-    <div class="h2">First-time setup</div>
+    <div class="h2">Configurare inițială</div>
     <div id="setupBody">
-      <p class="note" style="margin-top:0">You're the owner. This creates your 5 access keys. Key 1 is your owner key and gives you admin powers.</p>
-      <button class="primary" type="button" id="setupBtn" style="width:100%">Create my 5 keys</button>
+      <p class="note" style="margin-top:0">Tu ești șeful 👑 Aici se creează cele 5 chei de acces. Cheia 1 e a ta și îți dă puteri de admin.</p>
+      <button class="primary" type="button" id="setupBtn" style="width:100%">Creează cele 5 chei</button>
     </div>
     <div class="err" id="setupErr"></div>
   </div>
@@ -214,20 +295,20 @@
 
 <div id="gate" class="gate hidden">
   <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
-  <p class="note" style="text-align:center;margin:0 0 16px">Invite only. Enter your key to make your profile.</p>
+  <p class="note" style="text-align:center;margin:0 0 16px">Doar cu invitație 🎟️ Introdu cheia ca să-ți faci profilul.</p>
   <div class="card">
     <form id="gateForm" autocomplete="off">
-      <label for="keyIn" style="margin-top:0">Access key</label>
+      <label for="keyIn" style="margin-top:0">Cheie de acces</label>
       <input id="keyIn" placeholder="SEBO-XXXX-XXXX-XXXX" spellcheck="false" style="text-transform:uppercase;letter-spacing:1px">
       <label for="tagIn">Gamertag</label>
-      <input id="tagIn" maxlength="24" placeholder="What the squad calls you">
-      <label for="platIn">Platform</label>
+      <input id="tagIn" maxlength="24" placeholder="Cum îți zice echipa">
+      <label for="platIn">Platformă</label>
       <select id="platIn"></select>
-      <label>Icon</label>
+      <label>Iconiță</label>
       <div class="emojis" id="gateEmoji"></div>
-      <div style="margin-top:18px"><button class="primary" type="submit" id="gateBtn" style="width:100%">Enter SeboTECH CHAT</button></div>
+      <div style="margin-top:18px"><button class="primary" type="submit" id="gateBtn" style="width:100%">Intră în SeboTECH CHAT 🚀</button></div>
       <div class="err" id="gateErr"></div>
-      <p class="note" style="margin:12px 0 0;text-align:center">Signed in as <span id="gateEmail"></span> · <button class="link" type="button" id="gateSignOut">Sign out</button></p>
+      <p class="note" style="margin:12px 0 0;text-align:center">Conectat ca <span id="gateEmail"></span> · <button class="link" type="button" id="gateSignOut">Deconectare</button></p>
     </form>
   </div>
 </div>
@@ -237,12 +318,12 @@
     <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
     <nav class="tabs" id="tabs">
       <a href="#chat" data-v="chat"><span class="ico">💬</span><span>Chat</span><span class="badge hidden" id="chatBadge"></span></a>
-      <a href="#feed" data-v="feed"><span class="ico">📰</span><span>Feed</span></a>
-      <a href="#squad" data-v="squad"><span class="ico">👥</span><span>Squad</span></a>
-      <a href="#stats" data-v="stats"><span class="ico">📊</span><span>Stats</span></a>
-      <a href="#me" data-v="me"><span class="ico">⚙️</span><span>Profile</span></a>
+      <a href="#feed" data-v="feed"><span class="ico">📰</span><span>Postări</span></a>
+      <a href="#squad" data-v="squad"><span class="ico">👥</span><span>Echipa</span></a>
+      <a href="#stats" data-v="stats"><span class="ico">📊</span><span>Statistici</span></a>
+      <a href="#me" data-v="me"><span class="ico">⚙️</span><span>Profil</span></a>
     </nav>
-    <div class="mechip" id="meChip" title="Your profile"></div>
+    <div class="mechip" id="meChip" title="Profilul tău"></div>
   </div></div>
 
   <main>
@@ -255,12 +336,12 @@
           <div class="msgs" id="msgs"></div>
           <div class="typing" id="typing"></div>
           <form class="composer" id="chatForm">
-            <textarea id="chatIn" rows="1" maxlength="1000" placeholder="Message the squad…  (@name to ping)"></textarea>
-            <button class="primary" type="submit" id="chatBtn">Send</button>
+            <textarea id="chatIn" rows="1" maxlength="1000" placeholder="Scrie echipei…  (@nume ca să dai tag)"></textarea>
+            <button class="primary" type="submit" id="chatBtn">Trimite</button>
           </form>
         </div>
         <div class="card online-card">
-          <div class="h2">Online now · <span id="onlineCount">0</span></div>
+          <div class="h2">Online acum · <span id="onlineCount">0</span></div>
           <div class="list" id="onlineList"></div>
           <div class="h2" id="offlineHead" style="margin-top:16px">Offline</div>
           <div class="list" id="offlineList"></div>
@@ -275,11 +356,11 @@
           <form id="postForm">
             <div class="row" style="align-items:flex-start">
               <div class="av" id="postAv"></div>
-              <textarea class="grow" id="postIn" maxlength="1200" placeholder="Post today's grind: clutch moments, loadouts, rage quits…"></textarea>
+              <textarea class="grow" id="postIn" maxlength="1200" placeholder="Postează grindul de azi: faze clutch, loadout-uri, rage quit-uri…"></textarea>
             </div>
             <div class="row" style="margin-top:10px;justify-content:flex-end">
               <span class="note grow" id="postCount"></span>
-              <button class="primary" type="submit" id="postBtn">Post</button>
+              <button class="primary" type="submit" id="postBtn">Postează</button>
             </div>
           </form>
         </div>
@@ -289,24 +370,24 @@
 
     <!-- SQUAD -->
     <section id="v-squad" class="view hidden">
-      <div class="h2">The squad</div>
+      <div class="h2">Echipa 🎮</div>
       <div class="grid" id="squadGrid"></div>
     </section>
 
     <!-- STATS -->
     <section id="v-stats" class="view hidden">
       <div class="card daynav">
-        <button class="ghost" id="prevDay" aria-label="Previous day">◀</button>
+        <button class="ghost" id="prevDay" aria-label="Ziua anterioară">◀</button>
         <div class="label" id="dayLabel"></div>
-        <button class="ghost" id="nextDay" aria-label="Next day">▶</button>
+        <button class="ghost" id="nextDay" aria-label="Ziua următoare">▶</button>
       </div>
       <div class="card">
-        <div class="h2">My stats for this day</div>
+        <div class="h2">Statisticile mele din ziua asta</div>
         <div class="stats-grid" id="myStats"></div>
       </div>
       <div class="two">
-        <div class="card"><div class="h2" id="dayLbTitle">Day leaderboard</div><div id="dayLb"></div></div>
-        <div class="card"><div class="h2">All-time leaderboard</div><div id="allLb"></div></div>
+        <div class="card"><div class="h2" id="dayLbTitle">Clasamentul zilei</div><div id="dayLb"></div></div>
+        <div class="card"><div class="h2">Clasament general 🏆</div><div id="allLb"></div></div>
       </div>
     </section>
 
@@ -314,51 +395,51 @@
     <section id="v-me" class="view hidden">
       <div class="me-layout">
         <div class="card">
-          <div class="h2">Customize your profile</div>
+          <div class="h2">Personalizează-ți profilul ✨</div>
           <form id="meForm" autocomplete="off">
             <label for="mTag" style="margin-top:0">Gamertag</label>
             <input id="mTag" maxlength="24">
             <label for="mBio">Bio</label>
-            <textarea id="mBio" maxlength="200" placeholder="Tell the squad about yourself"></textarea>
+            <textarea id="mBio" maxlength="200" placeholder="Spune-le ceva despre tine"></textarea>
             <div class="two" style="gap:10px">
-              <div><label for="mPlat">Platform</label><select id="mPlat"></select></div>
-              <div><label for="mMode">Favorite mode</label><select id="mMode"></select></div>
-              <div><label for="mDrop">Go-to drop spot</label><input id="mDrop" maxlength="40" placeholder="Where you land"></div>
-              <div><label for="mMain">Main loadout</label><input id="mMain" maxlength="40" placeholder="e.g. AR + shotgun"></div>
+              <div><label for="mPlat">Platformă</label><select id="mPlat"></select></div>
+              <div><label for="mMode">Modul preferat</label><select id="mMode"></select></div>
+              <div><label for="mDrop">Unde aterizezi</label><input id="mDrop" maxlength="40" placeholder="ex. Tilted"></div>
+              <div><label for="mMain">Loadout principal</label><input id="mMain" maxlength="40" placeholder="ex. AR + shotgun"></div>
             </div>
             <label for="mStatus">Status</label>
-            <input id="mStatus" maxlength="60" placeholder="e.g. grinding ranked till 2am">
+            <input id="mStatus" maxlength="60" placeholder="ex. grind pe ranked până la 2 noaptea">
             <label class="row" style="text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);gap:8px;cursor:pointer">
-              <input type="checkbox" id="mLfg" style="width:auto"> Looking for a squad (shows an LFG badge)
+              <input type="checkbox" id="mLfg" style="width:auto"> Caut echipă (apare insigna LFG)
             </label>
-            <label>Icon</label>
+            <label>Iconiță</label>
             <div class="emojis" id="mEmoji"></div>
-            <label>Accent color</label>
+            <label>Culoare</label>
             <div class="swatches" id="mColor"></div>
             <label>Banner</label>
             <div class="banners" id="mBanner"></div>
             <div class="row" style="margin-top:18px">
-              <button class="primary" type="submit" id="meSave">Save profile</button>
+              <button class="primary" type="submit" id="meSave">Salvează profilul</button>
               <span class="note" id="meMsg"></span>
             </div>
           </form>
         </div>
         <div class="preview">
-          <div class="h2">Preview</div>
+          <div class="h2">Previzualizare</div>
           <div id="mePreview"></div>
         </div>
       </div>
       <div class="card keys hidden" id="keysCard" style="max-width:640px">
-        <div class="h2">Access keys · admin only</div>
-        <p class="note" style="margin-top:0">Keys are stored scrambled, so the database can't show them again. Copy a new key when you make it. Freeing a key removes that person and lets the key be used again.</p>
+        <div class="h2">Chei de acces · doar admin</div>
+        <p class="note" style="margin-top:0">Cheile sunt salvate criptat, deci nu mai pot fi afișate. Copiază o cheie nouă imediat ce o creezi. Dacă eliberezi o cheie, persoana e scoasă și cheia poate fi folosită din nou.</p>
         <div id="keysList"></div>
         <form class="row" id="newKeyForm" style="margin-top:12px">
-          <input id="newKeyLabel" maxlength="40" placeholder="Label, e.g. Key for Andrei">
-          <button type="submit" class="tiny" style="white-space:nowrap;padding:9px 12px">New key</button>
+          <input id="newKeyLabel" maxlength="40" placeholder="Etichetă, ex. Cheie pentru Andrei">
+          <button type="submit" class="tiny" style="white-space:nowrap;padding:9px 12px">Cheie nouă</button>
         </form>
         <div id="newKeyOut"></div>
       </div>
-      <div style="max-width:640px;margin-top:4px"><button type="button" id="signOutBtn">Sign out</button></div>
+      <div style="max-width:640px;margin-top:4px"><button type="button" id="signOutBtn">Deconectare</button></div>
     </section>
   </main>
 </div>
