@@ -572,6 +572,15 @@
   .share-on{display:flex;align-items:center;gap:8px;margin-top:6px;padding:7px 9px;border-radius:9px;background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.35);font-size:12.5px;font-weight:600;cursor:pointer}
   .share-on .vp-dot{background:#f43f5e;box-shadow:0 0 8px #f43f5e}
   @media (max-width:760px){ .stage{left:8px;right:8px;width:auto;bottom:calc(80px + var(--sab));height:240px;resize:none} }
+  /* admin usage */
+  .us-card{border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:14px 16px;margin-bottom:14px}
+  .us-h{display:flex;align-items:baseline;gap:8px;font-weight:800;font-size:15px;margin-bottom:10px;flex-wrap:wrap}
+  .us-row{margin:10px 0}
+  .us-val{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px}
+  .us-bar{height:9px;border-radius:99px;background:var(--panel3);overflow:hidden;margin:6px 0 3px}
+  .us-bar i{display:block;height:100%;border-radius:99px;background:#4ade80}
+  .us-bar.warn i{background:#f59e0b} .us-bar.bad i{background:#f43f5e}
+  .us-cat{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:13px}
   /* weekly leaderboard */
   .lb{border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:14px 16px;margin-bottom:18px}
   .lb-title{font-weight:800;font-size:17px}
@@ -692,6 +701,7 @@
       <a href="#feed" data-v="feed"><span class="ico">📰</span><span>Postări</span></a>
       <a href="#squad" data-v="squad"><span class="ico">👥</span><span>Membri</span></a>
       <a href="#me" data-v="me"><span class="ico">⚙️</span><span>Profil</span></a>
+      <a href="#usage" data-v="usage" id="usageTab" class="hidden"><span class="ico">📊</span><span>Utilizare</span></a>
     </nav>
     <button type="button" class="icon" id="topSettings" title="Setări" aria-label="Setări">⚙️</button>
     <div class="mechip" id="meChip" title="Profilul tău"></div>
@@ -770,6 +780,8 @@
     </section>
 
     <!-- ME -->
+    <section id="v-usage" class="view hidden"><div id="usageBox"></div></section>
+
     <section id="v-me" class="view hidden">
       <div class="me-layout">
         <div class="card">
@@ -830,6 +842,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=23"></script>
+<script type="module" src="app.js?v=24"></script>
 </body>
 </html>
