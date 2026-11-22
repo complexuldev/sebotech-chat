@@ -7,7 +7,7 @@ import {
   getFirestore, doc, collection, getDoc, getDocs, onSnapshot, query, where, orderBy, limit,
   writeBatch, setDoc, deleteDoc, updateDoc, serverTimestamp, increment, deleteField, startAfter, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { FIREBASE_CONFIG, MEDIA_URL } from "./config.js?v=11";
+import { FIREBASE_CONFIG, MEDIA_URL } from "./config.js?v=12";
 
 const app = initializeApp(FIREBASE_CONFIG);
 const auth = getAuth(app);
@@ -176,6 +176,12 @@ export async function uploadMedia(blob, kind){
   });
   if (!r.ok){ const t = await r.text().catch(() => ""); throw Object.assign(new Error(t || ("upload " + r.status)), { code: "media/" + r.status }); }
   return r.json();   // { url }
+}
+// Admin usage dashboard (Cloudflare storage + Firebase reads/writes), answered by the worker.
+export async function getUsage(fresh){
+  const r = await fetch(MEDIA_URL.replace(/\/$/, "") + "/stats" + (fresh ? "?fresh=1" : ""), { headers: { "Authorization": "Bearer " + await idToken() } });
+  if (!r.ok){ const t = await r.text().catch(() => ""); throw new Error(t || ("stats " + r.status)); }
+  return r.json();
 }
 export async function deleteMedia(url){
   if (!MEDIA_URL || !url || !url.startsWith(MEDIA_URL.replace(/\/$/, "") + "/m/")) return;
