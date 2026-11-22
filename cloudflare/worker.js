@@ -4,6 +4,8 @@
 //   GET    /m/<uid>/<file>             serve a picture (public, unguessable URL, cached for a year)
 //   DELETE /m/<uid>/<file>             delete your own picture
 //   POST   /notify                     send a push notification (new DM, @mention, incoming call)
+//   GET    /rtc?t=<ID token>           WebSocket for call set-up messages (offer / answer / ICE), relayed
+//                                       between friends by one Durable Object ("hub"). Audio/video never pass here.
 //
 // Security:
 //   * every write needs "Authorization: Bearer <Firebase ID token>"; the token's signature, audience,
@@ -20,6 +22,7 @@ const TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "
 // what the first bytes of the file must look like for each declared type
 const FAMILY = { "image/jpeg": "image/jpeg", "image/png": "image/png", "image/webp": "image/webp", "image/gif": "image/gif",
                  "audio/webm": "ebml", "video/webm": "ebml", "audio/ogg": "ogg", "audio/mp4": "isobmff", "video/mp4": "isobmff", "video/quicktime": "isobmff" };
+import { DurableObject } from "cloudflare:workers";
 const JWKS_URL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 
 export default {
@@ -37,6 +40,7 @@ export default {
       if (req.method === "DELETE" && url.pathname.startsWith("/m/")) return await remove(req, env, url, cors);
       if (req.method === "POST" && url.pathname === "/notify") return await notify(req, env, cors, ctx);
       if (req.method === "GET" && url.pathname === "/stats") return await stats(req, env, cors);
+      if (req.method === "GET" && url.pathname === "/rtc") return await rtcConnect(req, env, url);
       return json({ error: "not found" }, 404, cors);
     } catch (e) {
       const status = e.status || 500;
@@ -76,8 +80,8 @@ async function jwks() {
   jwksCache = { keys: (await r.json()).keys, exp: Date.now() + Math.min(maxAge, 21600) * 1000 };
   return jwksCache.keys;
 }
-async function verifyIdToken(req, env) {
-  const m = /^Bearer\s+([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(req.headers.get("Authorization") || "");
+async function verifyIdToken(req, env, raw) {
+  const m = /^Bearer\s+([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(raw != null ? "Bearer " + raw : (req.headers.get("Authorization") || ""));
   if (!m) throw fail(401, "missing token");
   const [h64, p64, s64] = m[1].split(".");
   let header, payload;
@@ -357,4 +361,66 @@ async function fsUsage(env, fresh) {
   fsCache = { at: Date.now(), since: start.getTime(), resetAt: start.getTime() + 86400000, reads, writes, deletes,
               limits: { reads: 50000, writes: 20000, deletes: 20000 }, week: { reads: r7, writes: w7, deletes: d7 } };
   return fsCache;
+}
+
+// ---------------- call set-up relay (WebSocket + one Durable Object) ----------------
+// Browsers can't add headers to a WebSocket, so the ID token comes in the URL (over TLS) and is checked
+// here, before the socket reaches the hub. The hub only forwards {to, d} to that friend's open sockets.
+async function rtcConnect(req, env, url) {
+  if ((req.headers.get("Upgrade") || "").toLowerCase() !== "websocket") throw fail(426, "websocket only");
+  if (!env.HUB) throw fail(501, "hub not configured");
+  const user = await verifyIdToken(req, env, url.searchParams.get("t") || "");
+  await requireMember(env, user);
+  await rateLimit(env.NOTIFY_LIMIT, "rtc:" + user.uid, 30);
+  const hub = env.HUB.get(env.HUB.idFromName("hub"));
+  return hub.fetch(new Request("https://hub/connect?uid=" + encodeURIComponent(user.uid), req));
+}
+
+export class Hub extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    // keep-alive pings are answered without waking the hub (no cost)
+    this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+  async fetch(req) {
+    const uid = new URL(req.url).searchParams.get("uid");
+    if (!uid) return new Response("no uid", { status: 400 });
+    const mine = this.ctx.getWebSockets(uid);
+    if (mine.length >= 4) try { mine[0].close(4000, "too many connections"); } catch (e) {}
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server, [uid]);
+    server.serializeAttachment({ uid });
+    this.presence();
+    return new Response(null, { status: 101, webSocket: client });
+  }
+  online(skip) {
+    const ids = new Set();
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === skip) continue;
+      const a = ws.deserializeAttachment();
+      if (a && a.uid) ids.add(a.uid);
+    }
+    return [...ids];
+  }
+  // everyone learns who is reachable here, so they know when to use this relay
+  presence(skip) {
+    const msg = JSON.stringify({ t: "online", ids: this.online(skip) });
+    for (const ws of this.ctx.getWebSockets()) if (ws !== skip) try { ws.send(msg); } catch (e) {}
+  }
+  async webSocketMessage(ws, data) {
+    if (typeof data !== "string" || data.length > 60000) return;
+    let m; try { m = JSON.parse(data); } catch (e) { return; }
+    const a = ws.deserializeAttachment(), from = a && a.uid;
+    if (!from || !m || typeof m !== "object") return;
+    if (m.t === "sig" && typeof m.to === "string" && m.to.length <= 128 && m.to !== from) {
+      const out = JSON.stringify({ t: "sig", from, d: m.d });
+      let sent = 0;
+      for (const t of this.ctx.getWebSockets(m.to)) { try { t.send(out); sent++; } catch (e) {} }
+      if (!sent) try { ws.send(JSON.stringify({ t: "nack", to: m.to, id: m.id })); } catch (e) {}
+    } else if (m.t === "online") {
+      try { ws.send(JSON.stringify({ t: "online", ids: this.online() })); } catch (e) {}
+    }
+  }
+  async webSocketClose(ws, code) { try { ws.close(code === 1005 ? 1000 : code, "bye"); } catch (e) {} this.presence(ws); }
+  async webSocketError(ws) { this.presence(ws); }
 }
