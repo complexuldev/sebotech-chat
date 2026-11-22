@@ -1,0 +1,35 @@
+# FolkChat media + push worker.  Deploy:  npx wrangler deploy   (run inside this folder)
+name = "folkchat-media"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+# Pictures live in this R2 bucket (create it once:  npx wrangler r2 bucket create folkchat-media)
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "folkchat-media"
+
+[vars]
+FIREBASE_PROJECT_ID = "sebotech-chat"
+# Only these websites may upload/delete/notify (comma separated). http://localhost allows any port.
+ALLOWED_ORIGINS = "https://complexuldev.github.io,http://localhost"
+
+# Per-user rate limits (requests per 60 seconds, per Cloudflare location)
+[[ratelimits]]
+name = "UPLOAD_LIMIT"
+namespace_id = "1101"
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
+[[ratelimits]]
+name = "NOTIFY_LIMIT"
+namespace_id = "1102"
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
+# Secrets for push notifications (from a Firebase service-account JSON key), set with:
+#   npx wrangler secret put SA_CLIENT_EMAIL
+#   npx wrangler secret put SA_PRIVATE_KEY
+# Without them uploads still work; only /notify answers 501.
