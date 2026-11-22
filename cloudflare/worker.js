@@ -13,8 +13,13 @@
 //   * only JPEG / PNG / WebP / GIF, checked by content type AND by the file's magic bytes;
 //   * CORS is locked to ALLOWED_ORIGINS; per-user rate limits on uploads and pushes.
 
-const MAX_BYTES = 10 * 1024 * 1024;
-const TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+const MAX_BYTES = 10 * 1024 * 1024, MAX_VIDEO = 50 * 1024 * 1024;
+const TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+                "audio/webm": "weba", "audio/ogg": "ogg", "audio/mp4": "m4a",
+                "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov" };
+// what the first bytes of the file must look like for each declared type
+const FAMILY = { "image/jpeg": "image/jpeg", "image/png": "image/png", "image/webp": "image/webp", "image/gif": "image/gif",
+                 "audio/webm": "ebml", "video/webm": "ebml", "audio/ogg": "ogg", "audio/mp4": "isobmff", "video/mp4": "isobmff", "video/quicktime": "isobmff" };
 const JWKS_URL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 
 export default {
@@ -134,6 +139,9 @@ function sniff(b) {
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return "image/png";
   if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return "image/gif";
   if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
+  if (b[0] === 0x1A && b[1] === 0x45 && b[2] === 0xDF && b[3] === 0xA3) return "ebml";                       // WebM / Matroska
+  if (b[0] === 0x4F && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) return "ogg";                        // OggS
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) return "isobmff";                    // ....ftyp (MP4 / M4A / MOV)
   return null;
 }
 async function upload(req, env, url, cors) {
@@ -141,14 +149,15 @@ async function upload(req, env, url, cors) {
   await requireMember(env, user);
   await rateLimit(env.UPLOAD_LIMIT, "up:" + user.uid, 20);
   const type = (req.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
-  if (!TYPES[type]) throw fail(415, "only JPEG, PNG, WebP or GIF");
+  if (!TYPES[type]) throw fail(415, "only images, voice messages (WebM/Ogg/M4A) or videos (MP4/WebM/MOV)");
+  const max = type.startsWith("video/") ? MAX_VIDEO : MAX_BYTES, maxTxt = (max / 1048576) + " MB";
   const declared = Number(req.headers.get("Content-Length") || 0);
-  if (declared > MAX_BYTES) throw fail(413, "max 10 MB");
+  if (declared > max) throw fail(413, "max " + maxTxt);
   const body = new Uint8Array(await req.arrayBuffer());
   if (!body.length) throw fail(400, "empty file");
-  if (body.length > MAX_BYTES) throw fail(413, "max 10 MB");
+  if (body.length > max) throw fail(413, "max " + maxTxt);
   const real = sniff(body);
-  if (real !== type) throw fail(415, "file content does not match its type");
+  if (real !== FAMILY[type]) throw fail(415, "file content does not match its type");
   const kind = ["chat", "post", "dm", "avatar"].includes(url.searchParams.get("kind")) ? url.searchParams.get("kind") : "chat";
   const rand = bytesToB64url(crypto.getRandomValues(new Uint8Array(12)));
   const key = user.uid + "/" + Date.now().toString(36) + "-" + rand + "." + TYPES[type];
@@ -162,6 +171,18 @@ const KEY_RE = /^\/m\/([A-Za-z0-9_-]{1,128})\/([A-Za-z0-9_.-]{1,80})$/;
 async function serve(req, env, ctx, url) {
   const m = KEY_RE.exec(url.pathname);
   if (!m) return new Response("not found", { status: 404 });
+  // videos and voice messages are fetched in pieces (seeking): answer Range requests straight from R2
+  if (req.headers.has("Range")){
+    const part = await env.MEDIA.get(m[1] + "/" + m[2], { range: req.headers });
+    if (!part) return new Response("not found", { status: 404 });
+    const ct0 = part.httpMetadata && part.httpMetadata.contentType;
+    const r = part.range || {}, off = r.offset || 0, len = r.length != null ? r.length : part.size - off;
+    return new Response(part.body, { status: 206, headers: {
+      "Content-Type": TYPES[ct0] ? ct0 : "application/octet-stream", "Accept-Ranges": "bytes",
+      "Content-Range": "bytes " + off + "-" + (off + len - 1) + "/" + part.size, "Content-Length": String(len),
+      "Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff",
+      "Cross-Origin-Resource-Policy": "cross-origin", "ETag": part.httpEtag } });
+  }
   const cache = caches.default, hit = await cache.match(req);
   if (hit) return hit;
   const obj = await env.MEDIA.get(m[1] + "/" + m[2]);
@@ -169,6 +190,7 @@ async function serve(req, env, ctx, url) {
   const ct = obj.httpMetadata && obj.httpMetadata.contentType;
   const res = new Response(obj.body, { headers: {
     "Content-Type": TYPES[ct] ? ct : "application/octet-stream",
+    "Accept-Ranges": "bytes",
     "Cache-Control": "public, max-age=31536000, immutable",
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; sandbox",
