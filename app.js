@@ -256,11 +256,38 @@ function route(){
   view = VIEWS.includes(v) ? v : "chat";
   for (const x of VIEWS) $("v-"+x).classList.toggle("hidden", x !== view);
   for (const a of $("tabs").children) a.classList.toggle("on", a.dataset.v === view);
-  if (view === "chat"){ markRead(); scrollChat(true); setTimeout(()=>$("chatIn").focus(), 50); }
+  if (view === "chat"){ markRead(); fitChat(); scrollChat(true); if (!isMobileLayout()) setTimeout(()=>$("chatIn").focus(), 50); }
   if (view === "me") fillMeForm();
   window.scrollTo(0,0);
 }
 window.addEventListener("hashchange", () => { if (started && me) route(); });
+// ---------- mobile layout: fit the chat to the REAL screen (Android WebView, font scaling, keyboard) ----------
+const isMobileLayout = () => window.matchMedia("(max-width: 900px)").matches;
+let fitRaf = 0;
+function fitChat(){
+  cancelAnimationFrame(fitRaf);
+  fitRaf = requestAnimationFrame(() => {
+    const dc = document.querySelector(".dc");
+    if (!dc || view !== "chat" || !isMobileLayout()){ if (dc) dc.style.height = ""; return; }
+    const vv = window.visualViewport;
+    const screenH = vv ? vv.height : window.innerHeight;
+    const nav = $("tabs");
+    const navFixed = nav && getComputedStyle(nav).position === "fixed" && getComputedStyle(nav).display !== "none";
+    const navH = navFixed ? nav.getBoundingClientRect().height : 0;
+    const top = dc.getBoundingClientRect().top + (vv ? vv.offsetTop : 0);
+    const h = Math.max(240, Math.floor(screenH - Math.max(0, top) - navH - 8));
+    dc.style.height = h + "px";
+    if (document.activeElement === $("chatIn")) scrollChat(true);
+  });
+}
+// While typing on a phone, hide the bottom tab bar so the message box sits right above the keyboard.
+document.addEventListener("focusin", e => { if (isMobileLayout() && e.target.matches("textarea, input:not([type=checkbox]):not([type=range]):not([type=file])")){ document.body.classList.add("kbd"); fitChat(); setTimeout(fitChat, 300); } });
+document.addEventListener("focusout", () => setTimeout(() => { const a = document.activeElement; if (!a || !a.matches("textarea, input")){ document.body.classList.remove("kbd"); fitChat(); } }, 60));
+window.addEventListener("resize", fitChat);
+window.addEventListener("orientationchange", () => setTimeout(fitChat, 250));
+if (window.visualViewport){ visualViewport.addEventListener("resize", fitChat); visualViewport.addEventListener("scroll", fitChat); }
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitChat);
+
 
 let uiBound = false;
 function bindUi(){
@@ -664,7 +691,8 @@ function selectChannel(cid){
   subConv(cid);
   replyTo = null; editing = null; renderReplyBar();
   renderChannels(); renderChatHeader(); renderMsgs(true); markRead(); renderTyping(); closeDrawer();
-  setTimeout(() => $("chatIn").focus(), 30);
+  if (!isMobileLayout()) setTimeout(() => $("chatIn").focus(), 30);
+  fitChat();
 }
 function closeDrawer(){ document.querySelector(".dc").classList.remove("drawer"); }
 
