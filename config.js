@@ -18,7 +18,7 @@ export const KLIPY_KEY = "7Cej8PO1ROTI5DDxeO4BC4CM0nbtCoyTN0TVL9Wocj4TKyPN7XPzdR
 // Cloudflare R2 media worker URL (see cloudflare/README.md), e.g. "https://folkchat-media.YOURNAME.workers.dev".
 // Empty = pictures are stored in Firestore instead (works, but uses more of the free quota).
 // If you use a custom domain instead of *.workers.dev, also add it to img-src/connect-src in index.html.
-export const MEDIA_URL = "";
+export const MEDIA_URL = "https://folkchat-media.ghiurcutadragosgamer.workers.dev";
 
 // Web Push key for browsers (Firebase console → Project settings → Cloud Messaging → Web Push certificates → Key pair).
 // Empty = no browser push (the Android app uses native push and doesn't need this).
