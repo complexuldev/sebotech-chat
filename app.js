@@ -1,6 +1,6 @@
-// SeboTECH CHAT – app UI. All user text is rendered with textContent (no HTML injection).
-import * as D from "./data.js?v=9";
-import { OWNER_EMAIL, KLIPY_KEY } from "./config.js?v=9";
+// FolkChat – app UI. All user text is rendered with textContent (no HTML injection).
+import * as D from "./data.js?v=11";
+import { OWNER_EMAIL, KLIPY_KEY, MEDIA_URL, VAPID_KEY } from "./config.js?v=11";
 
 const EMOJIS = ["😎","🐱","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
 const COLORS = ["#00e5ff","#a855f7","#ff4d6d","#ffd23f","#3ef08a","#ff9f43","#5b6cff","#ff6ad5","#ffffff"];
@@ -11,7 +11,7 @@ const BANNERS = {
   midnight:"linear-gradient(120deg,#0f1220,#252b4d 60%,#5b6cff)", gold:"linear-gradient(120deg,#5c4400,#ffd23f 60%,#fff3b0)"
 };
 const REACTS = [["fire","🔥"],["skull","💀"],["trophy","🏆"],["lol","😂"],["goat","🐐"]];
-const ONLINE_MS = 150000, TYPING_MS = 8000;
+const ONLINE_STALE_MS = 12 * 3600000;   // an "online" flag older than this is ignored (crashed app)
 
 const $ = id => document.getElementById(id);
 function h(tag, props, ...kids){
@@ -63,7 +63,8 @@ const bannerOf = p => BANNERS[(p && p.banner) || "neon"] || BANNERS.neon;
 
 function avatar(id, size){
   const p = P(id) || {};
-  const el = h("span",{class:"av" + (size ? " "+size : ""), style:"border-color:"+accent(p)}, p.avatar ? h("img",{src:p.avatar,alt:"",class:"av-img"}) : (p.emoji || "❔"));
+  const el = h("span",{class:"av" + (size ? " "+size : ""), style:"border-color:"+accent(p)}, p.avatar ? h("img",{src:p.avatar,alt:"",class:"av-img",loading:"lazy",decoding:"async"}) : (p.emoji || "❔"));
+  if (voiceSpeaking.has(id)) el.classList.add("speaking");
   if (online.has(id)) el.append(h("span",{class:"dot",title:"Online"}));
   return el;
 }
@@ -94,8 +95,15 @@ function writeErr(e){
 // ---------- auth flow ----------
 $("signInBtn").addEventListener("click", async () => {
   $("signInErr").textContent = "";
-  try { await D.signIn(); } catch(e){ if (D.errCode(e) !== "auth/popup-closed-by-user") $("signInErr").textContent = "Conectarea n-a mers. Permite pop-up-urile pentru site și încearcă din nou."; }
+  try { await D.signIn(); }
+  catch(e){
+    const c = D.errCode(e);
+    if (c === "auth/popup-closed-by-user" || /cancel|canceled|12501/i.test(String(e && e.message))) return;
+    $("signInErr").textContent = D.isNative ? "Conectarea cu Google n-a mers (" + c + "). Verifică internetul și încearcă din nou."
+      : "Conectarea n-a mers. Permite pop-up-urile pentru site și încearcă din nou.";
+  }
 });
+D.redirectResult().catch(e => { $("signInErr").textContent = "Conectarea n-a mers (" + D.errCode(e) + "). Încearcă din nou."; });
 for (const id of ["gateSignOut","signOutBtn"]) $(id).addEventListener("click", () => D.signOutUser().then(() => location.reload()));
 
 D.onAuth(async u => {
@@ -150,7 +158,7 @@ $("gateForm").addEventListener("submit", async ev => {
   ev.preventDefault();
   const err = $("gateErr"); err.textContent = "";
   const key = $("keyIn").value.trim().toUpperCase(), tag = $("tagIn").value.trim();
-  if (!/^SEBO-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) return err.textContent = "Asta nu arată a cheie. Ar trebui să arate așa: SEBO-XXXX-XXXX-XXXX.";
+  if (!/^(SEBO|FOLK)-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) return err.textContent = "Asta nu arată a cheie. Ar trebui să arate așa: FOLK-XXXX-XXXX-XXXX.";
   if (!tag) return err.textContent = "Alege un nume.";
   const btn = $("gateBtn"); btn.disabled = true; btn.textContent = "Verific cheia…";
   try {
@@ -167,13 +175,20 @@ function startApp(){
   if (started) return; started = true;
   showScreen("loading");
   const bootTimer = setTimeout(() => { $("loadingMsg").textContent = "Încă mă conectez… verifică internetul."; }, 10000);
+  // Paint instantly from the cached member list, then keep it live with ONE listener.
+  try {
+    const c = JSON.parse(localStorage.getItem("fc:profiles:" + uid) || "null");
+    if (c && c[uid]){ profiles = c; me = profiles[uid]; isAdmin = me.role === "admin"; showScreen("app"); route(); renderAll(); }
+  } catch(e){}
   unsubs.push(D.watchMembers((list, cached) => {
     clearTimeout(bootTimer);
     profiles = {}; for (const m of list) profiles[m.id] = m;
+    if (!cached) saveProfileCache();
     me = profiles[uid] || null;
     if (!me){ if (!cached) location.reload(); return; }
     const wasAdmin = isAdmin; isAdmin = me.role === "admin";
     if ($("app").classList.contains("hidden")){ showScreen("app"); route(); }
+    initPush();
     if (isAdmin && !wasAdmin) startAdmin();
     $("keysCard").classList.toggle("hidden", !isAdmin);
     renderAll();
@@ -181,16 +196,34 @@ function startApp(){
 
   initChat();
 
-  unsubs.push(D.watchPosts(list => { posts = list.sort((a,b)=>b.ts-a.ts); renderFeed(); }, () => $("feedList").replaceChildren(h("div",{class:"empty",text:"Postările nu s-au putut încărca."}))));
+  unsubs.push(D.watchPosts(list => { livePosts = list; mergePosts(); }, () => $("feedList").replaceChildren(h("div",{class:"empty",text:"Postările nu s-au putut încărca."}))));
   unsubs.push(D.watchPresence(list => { presence = list; computeOnline(); }));
-  setInterval(computeOnline, 15000);
+  initVoice();
 
-  // heartbeat
-  D.setPresence(false, pubCh()).catch(()=>{});
-  setInterval(() => { if (!document.hidden) D.setPresence(typingNow, pubCh()).catch(()=>{}); }, 60000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) D.setPresence(false, pubCh()).catch(()=>{}); });
+  // Online status: written only when it actually changes (no heartbeats, no typing pings).
+  presenceSet(true);
+  let awayTimer = null;
+  document.addEventListener("visibilitychange", () => {
+    clearTimeout(awayTimer);
+    if (document.hidden){ if (!voice.room && !call.pair) awayTimer = setTimeout(() => presenceSet(false), 120000); }
+    else presenceSet(true);
+  });
+  window.addEventListener("pagehide", () => { presenceSet(false); leaveVoice(true); if (call.pair) hangUp(true); });
 
   bindUi();
+}
+let presState = null;
+function presenceSet(on){
+  const want = (on ? "1" : "0") + "|" + (voice.room || "");
+  if (want === presState) return;
+  presState = want;
+  D.setPresence(on, voice.room || "").catch(() => { presState = null; });
+}
+function saveProfileCache(){
+  try { localStorage.setItem("fc:profiles:" + uid, JSON.stringify(profiles)); }
+  catch(e){   // too big for storage: keep everything except the avatars
+    try { const slim = {}; for (const k in profiles) slim[k] = Object.assign({}, profiles[k], { avatar: "" }); localStorage.setItem("fc:profiles:" + uid, JSON.stringify(slim)); } catch(e2){}
+  }
 }
 function startAdmin(){
   setTimeout(() => D.pruneChannels(channels.map(c => c.id), 30).catch(()=>{}), 8000);
@@ -202,8 +235,7 @@ function computeOnline(){
   const now = Date.now(), on = new Set([uid]), ty = new Set();
   for (const p of presence){
     if (!profiles[p.id]) continue;
-    if (now - p.seen < ONLINE_MS) on.add(p.id);
-    if (p.typing && p.id !== uid && now - p.seen < TYPING_MS) ty.add(p.id);
+    if (p.online === true && now - p.seen < ONLINE_STALE_MS) on.add(p.id);
   }
   const changed = [...on].sort().join() !== [...online].sort().join();
   const prevOnline = online;
@@ -246,7 +278,7 @@ function bindUi(){
     ev.preventDefault();
     const text = $("postIn").value.trim(), att = postAtt.get(); if (!text && !att) return;
     const btn = $("postBtn"); btn.disabled = true;
-    try { await D.createPost(text.slice(0,1200), att); $("postIn").value = ""; $("postCount").textContent = ""; postAtt.clear(); }
+    try { await D.createPost(text.slice(0,1200), await finalizeAtt(att, "post")); $("postIn").value = ""; $("postCount").textContent = ""; postAtt.clear(); }
     catch(e){ writeErr(e); }
     finally { btn.disabled = false; }
   });
@@ -284,39 +316,77 @@ function renderMeChip(){
 }
 
 // ---------- attachments ----------
-const MAX_IMG = 850000; // data-URL length limit (rules allow 900 KB)
+// Photos are shrunk in the browser before upload: max 1280px (chat/posts) or 400px (avatars), ~150 KB, WebP or JPEG.
+// GIFs are never re-encoded (that would kill the animation).
+const IMG_MAX_SIDE = 1280, IMG_TARGET = 150 * 1024, GIF_MAX = MEDIA_URL ? 8 * 1024 * 1024 : 600 * 1024;
 function readDataURL(file){ return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
 function imgDims(src){ return new Promise(res => { const i = new Image(); i.onload = () => res({ w: i.naturalWidth, h: i.naturalHeight }); i.onerror = () => res({ w: 0, h: 0 }); i.src = src; }); }
-async function prepImage(file){
-  if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error("Doar imagini (PNG, JPG, WEBP, GIF).");
-  if (file.type === "image/gif"){
-    if (file.size > 620000) throw new Error("GIF-ul e prea mare (max 600 KB). Încearcă butonul GIF.");
-    const data = await readDataURL(file); const d = await imgDims(data);
-    return { data, w: d.w, h: d.h };
+const canvasBlob = (c, type, q) => new Promise(res => c.toBlob(b => res(b && b.type === type ? b : null), type, q));
+let webpOK = null;
+async function encodeBest(c, target){
+  if (webpOK === null){ const t = document.createElement("canvas"); t.width = t.height = 2; webpOK = !!(await canvasBlob(t, "image/webp", 0.8)); }
+  const type = webpOK ? "image/webp" : "image/jpeg";
+  let best = null;
+  for (const q of [0.8, 0.66, 0.52]){
+    const b = await canvasBlob(c, type, q); if (!b) break;
+    if (!best || b.size < best.size) best = b;
+    if (b.size <= target) return b;
+    if (b.size > target * 2.2) break;        // way too big: shrinking the picture helps more than lowering quality
   }
-  const src = await readDataURL(file); const d = await imgDims(src);
-  const img = new Image(); img.src = src; await img.decode().catch(() => {});
-  let scale = Math.min(1, 1600 / Math.max(d.w || 1, d.h || 1));
+  return best;
+}
+async function loadImg(file){
+  if (window.createImageBitmap){ try { return await createImageBitmap(file); } catch(e){} }
+  const img = new Image(); img.src = URL.createObjectURL(file); await img.decode(); return img;
+}
+async function shrink(file, maxSide, target){
+  const img = await loadImg(file);
+  const w0 = img.width || img.naturalWidth, h0 = img.height || img.naturalHeight;
+  let scale = Math.min(1, maxSide / Math.max(w0, h0));
   for (let round = 0; round < 6; round++){
-    const w = Math.max(1, Math.round(d.w * scale)), h = Math.max(1, Math.round(d.h * scale));
+    const w = Math.max(1, Math.round(w0 * scale)), h = Math.max(1, Math.round(h0 * scale));
     const c = document.createElement("canvas"); c.width = w; c.height = h;
     const g = c.getContext("2d"); g.fillStyle = "#111"; g.fillRect(0, 0, w, h); g.drawImage(img, 0, 0, w, h);
-    for (const q of [0.85, 0.72, 0.6]){
-      const data = c.toDataURL("image/jpeg", q);
-      if (data.length <= MAX_IMG) return { data, w, h };
-    }
-    scale *= 0.7;
+    const b = await encodeBest(c, target);
+    if (b && b.size <= target * 1.15) return { blob: b, w, h };
+    // size grows with pixel count, so jump straight to a scale that should fit
+    scale *= Math.max(0.35, Math.min(0.85, Math.sqrt(target / ((b && b.size) || target * 4)) * 0.95));
   }
   throw new Error("Imaginea e prea mare.");
 }
+const blobToDataURL = b => readDataURL(b);
+async function prepImage(file){
+  if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error("Doar imagini (PNG, JPG, WEBP, GIF).");
+  if (file.type === "image/gif"){
+    if (file.size > GIF_MAX) throw new Error("GIF-ul e prea mare (max " + Math.round(GIF_MAX / 1048576 * 10) / 10 + " MB). Încearcă butonul GIF.");
+    const preview = URL.createObjectURL(file); const d = await imgDims(preview);
+    return { blob: file, w: d.w, h: d.h, preview };
+  }
+  const r = await shrink(file, IMG_MAX_SIDE, IMG_TARGET);
+  r.preview = URL.createObjectURL(r.blob);
+  return r;
+}
+// Turn a picked picture into what gets stored: a worker URL (R2) or, without a worker, a data URL in Firestore.
+async function finalizeAtt(att, kind){
+  if (!att || !att.img) return att;
+  const im = att.img;
+  if (D.mediaOn()){
+    const { url } = await D.uploadMedia(im.blob, kind);
+    return { pic: { url, w: im.w, h: im.h } };
+  }
+  const data = await blobToDataURL(im.blob);
+  if (data.length > 900000) throw new Error("Imaginea e prea mare.");
+  return { img: { data, w: im.w, h: im.h } };
+}
+const mediaUrlOk = u => typeof u === "string" && !!MEDIA_URL && u.startsWith(MEDIA_URL.replace(/\/$/, "") + "/m/");
 function attachBox(kind){
   // kind: "chat" | "post"; returns controller with get/clear
   const st = { att: null };
   const prev = $(kind + "Prev");
   function show(){
     if (!st.att){ prev.classList.add("hidden"); prev.replaceChildren(); return; }
-    const src = st.att.img ? st.att.img.data : st.att.gif.thumb || st.att.gif.url;
-    prev.replaceChildren(h("img",{src,alt:""}), h("span",{class:"note",text: st.att.img ? "Imagine atașată" : "GIF"}),
+    const src = st.att.img ? st.att.img.preview : st.att.gif.thumb || st.att.gif.url;
+    prev.replaceChildren(h("img",{src,alt:"",decoding:"async"}), h("span",{class:"note",text: st.att.img ? "Imagine atașată" : "GIF"}),
       h("button",{type:"button",class:"icon",title:"Elimină","aria-label":"Elimină atașamentul",text:"✕",onclick:()=>{ st.att = null; show(); }}));
     prev.classList.remove("hidden");
   }
@@ -332,14 +402,21 @@ function attachBox(kind){
   return { get: () => st.att, clear: () => { st.att = null; show(); }, useFile };
 }
 function attEl(m){
+  if (m.pic && mediaUrlOk(m.pic.url)){
+    const el = h("img",{class:"att",alt:"imagine",loading:"lazy",decoding:"async",src:m.pic.url});
+    if (m.pic.w && m.pic.h) el.style.aspectRatio = m.pic.w + "/" + m.pic.h;
+    el.onclick = () => lightbox(m.pic.url);
+    el.onerror = () => el.replaceWith(h("div",{class:"note",text:"(imagine ștearsă)"}));
+    return el;
+  }
   if (m.img){
-    const el = h("img",{class:"att",alt:"imagine",loading:"lazy"});
+    const el = h("img",{class:"att",alt:"imagine",loading:"lazy",decoding:"async"});
     if (m.w && m.h) el.style.aspectRatio = m.w + "/" + m.h;
     D.getImage(m.img).then(src => { if (src){ el.src = src; el.onclick = () => lightbox(src); } else el.replaceWith(h("div",{class:"note",text:"(imagine ștearsă)"})); });
     return el;
   }
   if (m.gif && typeof m.gif.url === "string" && /^https:\/\/[a-z0-9.-]*klipy\.com\//.test(m.gif.url)){
-    const el = h("img",{class:"att",alt:"GIF",loading:"lazy",src:m.gif.url});
+    const el = h("img",{class:"att",alt:"GIF",loading:"lazy",decoding:"async",src:m.gif.url});
     if (m.gif.w && m.gif.h){ el.style.aspectRatio = m.gif.w + "/" + m.gif.h; el.style.width = Math.min(m.gif.w, 300) + "px"; }
     el.onclick = () => lightbox(m.gif.url);
     return el;
@@ -348,7 +425,7 @@ function attEl(m){
 }
 function lightbox(src){
   openId = null;
-  $("overlay").replaceChildren(h("img",{class:"lightbox",src,alt:""}), h("button",{class:"close lb-close",type:"button","aria-label":"Închide",text:"✕",onclick:closeProfile}));
+  $("overlay").replaceChildren(h("img",{class:"lightbox",src,alt:"",decoding:"async"}), h("button",{class:"close lb-close",type:"button","aria-label":"Închide",text:"✕",onclick:closeProfile}));
   $("overlay").classList.remove("hidden");
 }
 
@@ -466,6 +543,35 @@ const pings = (m, cid) => isDmId(cid) ? m.uid !== uid : isMentioned(m);
 const convName = cid => isDmId(cid) ? "@" + ((P(dmOther(cid)) || {}).tag || "?") : "#" + ((channels.find(c => c.id === cid) || {}).name || "");
 const chMsgs = {};          // cid -> messages (ascending)
 const chUnsub = {};         // cid -> unsubscribe
+const chLim = {};           // cid -> current listener size (50 for the open chat, 5 for the rest)
+const chOlder = {};         // cid -> older messages loaded with "Încarcă mesaje mai vechi"
+const chEnd = {};           // cid -> true when there is nothing older
+const LIVE_N = 50, BG_N = 5;
+// Only the open conversation listens to its last 50 messages; the others listen to 5 (enough for unread badges).
+function subConv(cid){
+  const n = cid === curCh ? LIVE_N : BG_N;
+  if (chUnsub[cid] && chLim[cid] === n) return;
+  if (chUnsub[cid]) chUnsub[cid]();
+  chLim[cid] = n;
+  chUnsub[cid] = D.watchMsgs(cid, n, msgs => onMsgs(cid, msgs), () => {});
+}
+function dropConv(cid){ if (chUnsub[cid]){ chUnsub[cid](); delete chUnsub[cid]; } delete chLim[cid]; delete chMsgs[cid]; delete chOlder[cid]; delete chEnd[cid]; }
+async function loadOlderMsgs(btn){
+  const cid = curCh, list = convList(cid); if (!list.length) return;
+  btn.disabled = true; btn.textContent = "Se încarcă…";
+  const box = $("msgs"), h0 = box.scrollHeight, t0 = box.scrollTop;
+  try {
+    const more = await D.loadOlder(cid, list[0].ts, 50);
+    if (more.length < 50) chEnd[cid] = true;
+    chOlder[cid] = more.concat(chOlder[cid] || []);
+    if (cid === curCh){ renderMsgs(false); box.scrollTop = t0 + (box.scrollHeight - h0); }
+  } catch(e){ writeErr(e); btn.disabled = false; btn.textContent = "Încarcă mesaje mai vechi"; }
+}
+function convList(cid){
+  const seen = new Set(), out = [];
+  for (const m of (chOlder[cid] || []).concat(chMsgs[cid] || [])) if (!seen.has(m.id)){ seen.add(m.id); out.push(m); }
+  return out.sort((a,b) => a.ts - b.ts);
+}
 const chFirst = {};         // cid -> first snapshot received
 let replyTo = null, editing = null;
 let chatAtt = null;
@@ -479,15 +585,16 @@ function initChat(){
   loadRead();
   unsubs.push(D.watchChannels(list => {
     channels = list.sort((a,b) => (a.pos||0) - (b.pos||0));
-    for (const c of channels) if (!chUnsub[c.id]) chUnsub[c.id] = D.watchMsgs(c.id, 80, msgs => onMsgs(c.id, msgs), () => {});
-    for (const id of Object.keys(chUnsub)) if (!isDmId(id) && !channels.find(c => c.id === id)){ chUnsub[id](); delete chUnsub[id]; delete chMsgs[id]; }
     chReady = true; ensureCur();
+    for (const c of channels) subConv(c.id);
+    for (const id of Object.keys(chUnsub)) if (!isDmId(id) && !channels.find(c => c.id === id)) dropConv(id);
     renderChannels(); renderChatHeader(); renderMsgs(true);
   }));
   unsubs.push(D.watchDms(list => {
     dms = list.sort((a,b) => b.last - a.last);
-    for (const c of dms) if (!chUnsub[c.id]) chUnsub[c.id] = D.watchMsgs(c.id, 80, msgs => onMsgs(c.id, msgs), () => {});
     dmReady = true; ensureCur();
+    for (const c of dms) subConv(c.id);
+    if (isDmId(curCh)) subConv(curCh);
     renderChannels(); renderChatHeader(); renderMsgs(false); renderChatBadge();
   }));
   document.addEventListener("visibilitychange", () => { if (!document.hidden) markRead(); });
@@ -498,8 +605,9 @@ function ensureCur(){
   const ok = cid => cid && (isDmId(cid) ? cid.slice(3).split("_").includes(uid) : channels.some(c => c.id === cid));
   if (ok(curCh)) return;
   let want = null; try { want = localStorage.getItem("sebo:ch"); } catch(e){}
-  if (!chReady || !dmReady){ if (isDmId(want) && ok(want)) curCh = want; return; }
+  if (!chReady || !dmReady){ if (isDmId(want) && ok(want)){ curCh = want; subConv(curCh); } return; }
   curCh = ok(want) ? want : ((dms[0] || channels[0] || {}).id || null);
+  if (curCh) subConv(curCh);
 }
 function onMsgs(cid, list){
   const prev = chMsgs[cid] || [];
@@ -538,7 +646,7 @@ function renderChatBadge(){
   b.textContent = mentions ? (mentions > 99 ? "99+" : String(mentions)) : "";
   b.classList.toggle("hidden", !mentions && !anyUnread);
   b.classList.toggle("dotonly", !mentions && anyUnread);
-  document.title = (mentions ? "(" + mentions + ") " : anyUnread ? "• " : "") + "SeboTECH CHAT";
+  document.title = (mentions ? "(" + mentions + ") " : anyUnread ? "• " : "") + "FolkChat";
 }
 function notifyDesktop(m, cid, mention){
   if (!settings.notify || !("Notification" in window) || Notification.permission !== "granted" || !document.hidden) return;
@@ -550,7 +658,10 @@ function notifyDesktop(m, cid, mention){
 }
 function selectChannel(cid){
   if (!cid || cid === curCh){ closeDrawer(); return; }
+  const prev = curCh;
   curCh = cid; try { localStorage.setItem("sebo:ch", cid); } catch(e){}
+  if (prev){ delete chOlder[prev]; delete chEnd[prev]; if (chUnsub[prev]) subConv(prev); }   // shrink the old chat's listener back to 5
+  subConv(cid);
   replyTo = null; editing = null; renderReplyBar();
   renderChannels(); renderChatHeader(); renderMsgs(true); markRead(); renderTyping(); closeDrawer();
   setTimeout(() => $("chatIn").focus(), 30);
@@ -618,13 +729,14 @@ function renderUserPanel(){
 function renderChatHeader(){
   const dm = isDmId(curCh), c = dm ? null : channels.find(x => x.id === curCh), other = dm ? P(dmOther(curCh)) : null;
   const has = !!(c || other);
-  $("chHead").replaceChildren(
+  $("chHead").replaceChildren(...[
     h("button",{type:"button",class:"icon dc-burger",title:"Conversații","aria-label":"Arată conversațiile",text:"☰",onclick:() => document.querySelector(".dc").classList.toggle("drawer")}),
     dm && other ? avatar(dmOther(curCh),"sm") : h("span",{class:"ch-ico big",text: c ? (c.emoji || "#") : "💬"}),
     h("b",{text: dm ? (other ? other.tag : "?") : c ? c.name : "Mesaje"}),
     dm ? h("span",{class:"ch-topic grow",text:"🔒 Conversație privată" + (online.has(dmOther(curCh)) ? " · online" : "")}) : c && c.topic ? h("span",{class:"ch-topic grow",text:c.topic}) : h("span",{class:"grow"}),
+    dm && other ? h("button",{type:"button",class:"icon callbtn" + (call.pair ? " off" : ""),title: call.pair ? "Ești deja într-un apel" : "Apel vocal","aria-label":"Sună",text:"📞",onclick:() => startCallTo(dmOther(curCh))}) : null,
     has ? h("button",{type:"button",class:"icon",title: settings.muted[curCh] ? "Activează notificările" : "Dezactivează notificările","aria-label":"Mute",text: settings.muted[curCh] ? "🔕" : "🔔",onclick:() => { settings.muted[curCh] = !settings.muted[curCh]; if (!settings.muted[curCh]) delete settings.muted[curCh]; saveSettings(); renderChatHeader(); renderChannels(); renderChatBadge(); }}) : null,
-    h("button",{type:"button",class:"icon dc-memtoggle",title:"Membri","aria-label":"Arată membrii",text:"👥",onclick:() => document.querySelector(".dc").classList.toggle("nomembers")}));
+    h("button",{type:"button",class:"icon dc-memtoggle",title:"Membri","aria-label":"Arată membrii",text:"👥",onclick:() => document.querySelector(".dc").classList.toggle("nomembers")})].filter(Boolean));
   $("chatIn").placeholder = dm ? "Mesaj către @" + (other ? other.tag : "") : c ? "Mesaj #" + c.name : "Alege o conversație";
   $("chatIn").disabled = !has; $("chatBtn").disabled = !has;
   $("fmtHint").textContent = "**bold** *italic* __subliniat__ ~~tăiat~~ `cod` ||spoiler||" + (dm ? "" : " · @nume") + " · ↑ editează ultimul mesaj";
@@ -676,7 +788,7 @@ function renderMsgs(force){
   if (!me) return;
   const box = $("msgs");
   const stick = force || nearBottom(box);
-  const list = (chMsgs[curCh] || []).filter(m => profiles[m.uid]);
+  const full = convList(curCh), list = full.filter(m => profiles[m.uid]);
   if (!curCh){ box.replaceChildren(h("div",{class:"empty"}, h("div",{style:"font-size:42px",text:"💬"}), h("h3",{text:"Mesaje private"}), h("p",{class:"note",text:"Alege pe cineva din stânga sau apasă 💬 lângă un membru ca să-i scrii. Conversațiile sunt doar între voi doi."}), h("button",{type:"button",class:"primary",text:"Mesaj nou",onclick:dmPicker}))); return; }
   let out;
   if (isDmId(curCh)){
@@ -686,6 +798,7 @@ function renderMsgs(force){
     const c = channels.find(x => x.id === curCh) || {};
     out = [h("div",{class:"ch-welcome"}, h("div",{class:"ch-welcome-ico",text:c.emoji || "#"}), h("h3",{text:"Bun venit în #" + (c.name || "")}), h("div",{class:"note",text: c.topic || "Ăsta e începutul canalului."}))];
   }
+  if (full.length >= LIVE_N && !chEnd[curCh]) out.push(h("button",{type:"button",class:"tiny older-btn",text:"Încarcă mesaje mai vechi",onclick:ev => loadOlderMsgs(ev.currentTarget)}));
   const lr = lastRead[curCh] || 0; let newLine = false;
   let lastDay = null, last = null;
   for (const m of list){
@@ -706,7 +819,7 @@ function msgEl(m, grouped){
     h("button",{type:"button",title:"Reacționează","aria-label":"Reacționează",text:"😀",onclick:ev => rxPicker(ev.currentTarget, m)}),
     h("button",{type:"button",title:"Răspunde","aria-label":"Răspunde",text:"↩",onclick:() => startReply(m)}),
     mine ? h("button",{type:"button",title:"Editează","aria-label":"Editează",text:"✎",onclick:() => startEdit(m)}) : null,
-    canDel ? h("button",{type:"button",title:"Șterge","aria-label":"Șterge",class:"danger",text:"🗑",onclick:ev => { const b = ev.currentTarget; if (b.dataset.sure !== "1"){ b.dataset.sure = "1"; b.textContent = "Sigur?"; setTimeout(() => { b.dataset.sure = ""; b.textContent = "🗑"; }, 3000); return; } D.deleteMsg(curCh, m.id, m.img).catch(writeErr); }}) : null);
+    canDel ? h("button",{type:"button",title:"Șterge","aria-label":"Șterge",class:"danger",text:"🗑",onclick:ev => { const b = ev.currentTarget; if (b.dataset.sure !== "1"){ b.dataset.sure = "1"; b.textContent = "Sigur?"; setTimeout(() => { b.dataset.sure = ""; b.textContent = "🗑"; }, 3000); return; } D.deleteMsg(curCh, m.id, m.img, m.pic && m.pic.url).catch(writeErr); }}) : null);
   const body = h("div",{class:"grow mbody"});
   if (m.reply && typeof m.reply === "object"){
     const rp = P(m.reply.uid);
@@ -717,7 +830,7 @@ function msgEl(m, grouped){
   if (editing === m.id){
     const ta = h("textarea",{class:"editbox",maxlength:"2000"}); ta.value = m.text || "";
     ta.addEventListener("keydown", e => {
-      if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); const t = ta.value.trim(); if (!t && !m.img && !m.gif) return; D.editMsg(curCh, m.id, t.slice(0,2000)).then(() => { editing = null; renderMsgs(false); }).catch(writeErr); }
+      if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); const t = ta.value.trim(); if (!t && !m.img && !m.gif && !m.pic) return; D.editMsg(curCh, m.id, t.slice(0,2000)).then(() => { editing = null; renderMsgs(false); }).catch(writeErr); }
       if (e.key === "Escape"){ editing = null; renderMsgs(false); }
     });
     body.append(ta, h("div",{class:"note",style:"font-size:12px",text:"Enter = salvează · Esc = anulează"}));
@@ -725,7 +838,7 @@ function msgEl(m, grouped){
   } else if (m.text){
     body.append(h("div",{class:"txt"}, richText(m.text), m.edited ? h("span",{class:"edited",text:" (editat)"}) : null));
   }
-  if (m.img || m.gif) body.append(h("div",{class:"attwrap"}, attEl(m)));
+  if (m.img || m.gif || m.pic) body.append(h("div",{class:"attwrap"}, attEl(m)));
   const rx = m.rx || {}, counts = {};
   for (const k in rx) if (rx[k]){ const [key, who] = [k.slice(0, k.indexOf("_")), k.slice(k.indexOf("_") + 1)]; (counts[key] = counts[key] || []).push(who); }
   const chips = MSG_RX.filter(([k]) => counts[k]).map(([k,e]) => h("button",{type:"button",class:"rx" + (counts[k].includes(uid) ? " on" : ""),title:counts[k].map(id => (P(id)||{}).tag || "?").join(", "),onclick:() => toggleRx(m, k)}, e + " " + counts[k].length));
@@ -781,12 +894,8 @@ function renderMembers(){
   $("memList").replaceChildren(h("div",{class:"h2",text:"Online — " + on.length}), ...on.map(row),
     ...(off.length ? [h("div",{class:"h2",style:"margin-top:14px",text:"Offline — " + off.length})] : []), ...off.map(row));
 }
-function renderTyping(){
-  const now = Date.now();
-  if (!curCh || isDmId(curCh)){ $("typing").textContent = ""; return; }
-  const names = presence.filter(p => p.id !== uid && p.typing && p.ch === curCh && now - p.seen < TYPING_MS && profiles[p.id]).map(p => P(p.id).tag);
-  $("typing").textContent = !names.length ? "" : names.length === 1 ? names[0] + " scrie…" : names.length < 4 ? names.slice(0,-1).join(", ") + " și " + names.slice(-1) + " scriu…" : "Mai mulți oameni scriu…";
-}
+// Typing indicators were removed on purpose: they cost a database write on every keystroke burst.
+function renderTyping(){ $("typing").textContent = ""; }
 
 // ---------- composer: mentions autocomplete, send ----------
 let mentionPop = null, mentionSel = 0, mentionItems = [];
@@ -815,13 +924,10 @@ function bindChat(){
   chatAtt = attachBox("chat");
   $("chAdd").onclick = () => channelModal(null);
   $("dmAdd").onclick = dmPicker;
+  $("voiceAdd").onclick = () => voiceRoomModal(null);
   ci.addEventListener("input", () => {
     ci.style.height = "auto"; ci.style.height = Math.min(180, ci.scrollHeight) + "px";
     updateMentionPop();
-    if (isDmId(curCh)) return;   // no typing broadcast in private DMs
-    if (!typingNow && ci.value.trim()){ typingNow = true; D.setPresence(true, pubCh()).catch(()=>{}); }
-    clearTimeout(typingOff);
-    typingOff = setTimeout(() => { if (typingNow){ typingNow = false; D.setPresence(false, pubCh()).catch(()=>{}); } }, 4000);
   });
   ci.addEventListener("click", updateMentionPop);
   ci.addEventListener("blur", () => setTimeout(closeMentionPop, 120));
@@ -853,10 +959,17 @@ function bindChat(){
     if (replyTo) extra.reply = { id: replyTo.id, uid: replyTo.uid, text: (replyTo.text || "").slice(0, 140) };
     sending = true; $("chatBtn").disabled = true;
     ci.value = ""; ci.style.height = "auto"; closeMentionPop();
-    if (typingNow){ typingNow = false; clearTimeout(typingOff); D.setPresence(false, pubCh()).catch(()=>{}); }
-    try { await D.sendMsg(curCh, text.slice(0,2000), att, extra); chatAtt.clear(); replyTo = null; renderReplyBar(); playSfx("send"); scrollChat(true); }
+    const cid = curCh;
+    try {
+      if (att && att.img) $("chatBtn").textContent = "Se încarcă…";
+      await D.sendMsg(cid, text.slice(0,2000), await finalizeAtt(att, isDmId(cid) ? "dm" : "chat"), extra);
+      chatAtt.clear(); replyTo = null; renderReplyBar(); playSfx("send"); scrollChat(true);
+      const preview = text ? text.slice(0, 100) : "📎 atașament";
+      if (isDmId(cid)) D.pushNotify({ type: "dm", cid: cid.slice(3), text: preview });
+      else if (mentions.length || everyone) D.pushNotify({ type: "mention", ch: cid, to: everyone ? ["*"] : mentions.slice(0, 25), text: preview });
+    }
     catch(e){ ci.value = text; writeErr(e); }
-    finally { sending = false; $("chatBtn").disabled = false; }
+    finally { sending = false; $("chatBtn").disabled = false; $("chatBtn").textContent = "Trimite"; }
   });
 }
 
@@ -928,7 +1041,7 @@ function openSettings(){
       body.replaceChildren(
         toggle("Notificări pe desktop", () => settings.notify, async v => {
           if (v && can && Notification.permission !== "granted"){ const r = await Notification.requestPermission(); if (r !== "granted"){ settings.notify = false; saveSettings(); flash("Browserul a blocat notificările.", true); draw(); return; } }
-          settings.notify = v; saveSettings();
+          settings.notify = v; saveSettings(); if (v) maybeWebPush();
         }, can ? "Apar când site-ul e în fundal" : "Browserul tău nu suportă notificări"),
         toggle("Notifică pentru toate mesajele din canale", () => settings.notifyAll, v => settings.notifyAll = v, "Mesajele private și @mențiunile notifică mereu"),
         h("div",{class:"h2",style:"margin-top:18px",text:"Conversații cu sunetul oprit"}),
@@ -972,7 +1085,7 @@ function postCard(post){
   }
   const rc = Math.max(0, post.replyCount || 0);
   reacts.append(h("button",{type:"button",class:"link",style:"margin-left:auto",text: openReplies.has(post.id) ? "Ascunde comentariile" : (rc ? "💬 " + rc + (rc===1?" comentariu":" comentarii") : "💬 Comentează"),onclick:()=>toggleReplies(post)}));
-  if (post.uid === uid || isAdmin) reacts.append(h("button",{type:"button",class:"link",text:"șterge",onclick:()=>{ if (confirmTwice(post.id)) D.deletePost(post.id, post.img).catch(writeErr); }}));
+  if (post.uid === uid || isAdmin) reacts.append(h("button",{type:"button",class:"link",text:"șterge",onclick:()=>{ if (confirmTwice(post.id)) D.deletePost(post.id, post.img, post.pic && post.pic.url).catch(writeErr); }}));
   let replies = null;
   const entry = openReplies.get(post.id);
   if (entry){
@@ -990,13 +1103,26 @@ function postCard(post){
       h("div",{class:"grow"},
         h("div",{class:"meta"}, nameEl(post.uid), h("span",{text:ago(post.ts)})),
         post.text ? h("div",{class:"text"}, withMentions(post.text)) : null,
-        (post.img || post.gif) ? h("div",{class:"attwrap"}, attEl(post)) : null,
+        (post.img || post.gif || post.pic) ? h("div",{class:"attwrap"}, attEl(post)) : null,
         reacts, replies)));
+}
+let livePosts = [], olderPosts = [], postsEnd = false;
+function mergePosts(){
+  const seen = new Set(), all = [];
+  for (const p of livePosts.concat(olderPosts)) if (!seen.has(p.id)){ seen.add(p.id); all.push(p); }
+  posts = all.sort((a,b) => b.ts - a.ts); renderFeed();
+}
+async function morePosts(btn){
+  const oldest = posts.length ? posts[posts.length - 1].ts : Date.now();
+  btn.disabled = true; btn.textContent = "Se încarcă…";
+  try { const more = await D.loadOlderPosts(oldest); if (more.length < 50) postsEnd = true; olderPosts = olderPosts.concat(more); mergePosts(); }
+  catch(e){ writeErr(e); btn.disabled = false; btn.textContent = "Încarcă postări mai vechi"; }
 }
 function renderFeed(){
   if (!me) return;
   const vis = posts.filter(p => profiles[p.uid]);
-  $("feedList").replaceChildren(...(vis.length ? vis.map(postCard) : [h("div",{class:"empty",text:"Nicio postare încă. Fă tu prima ✨"})]));
+  const more = posts.length >= 50 && !postsEnd ? h("button",{type:"button",class:"tiny",style:"display:block;margin:6px auto 20px",text:"Încarcă postări mai vechi",onclick:ev => morePosts(ev.currentTarget)}) : null;
+  $("feedList").replaceChildren(...(vis.length ? vis.map(postCard) : [h("div",{class:"empty",text:"Nicio postare încă. Fă tu prima ✨"})]), ...(more ? [more] : []));
 }
 
 // ---------- squad ----------
@@ -1031,7 +1157,9 @@ function profileView(id, p, preview){
       theirPosts.map(x => h("div",{class:"fact",style:"margin-bottom:8px"}, h("div",{class:"k",text:ago(x.ts)}), h("div",{class:"v",style:"font-weight:500;white-space:pre-wrap",text: !x.text ? (x.img ? "🖼️ imagine" : "🎞️ GIF") : x.text.length > 220 ? x.text.slice(0,220)+"…" : x.text}))),
       preview ? null : h("div",{class:"row",style:"margin-top:16px;gap:8px"},
         id === uid ? h("button",{class:"primary",type:"button",text:"Editează profilul",onclick:()=>{ closeProfile(); location.hash = "#me"; }})
-                   : h("button",{class:"primary",type:"button",text:"💬 Trimite mesaj privat",onclick:()=>{ closeProfile(); openDm(id); }})))
+                   : h("div",{class:"row",style:"gap:8px;flex-wrap:wrap"},
+                       h("button",{class:"primary",type:"button",text:"💬 Trimite mesaj privat",onclick:()=>{ closeProfile(); openDm(id); }}),
+                       h("button",{class:"tiny",type:"button",style:"padding:10px 14px",text:"📞 Sună",onclick:()=>{ closeProfile(); startCallTo(id); }}))))
   ];
 }
 let openId = null;
@@ -1074,9 +1202,12 @@ async function makeAvatar(file){
   if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error("Doar imagini (PNG, JPG, WEBP, GIF).");
   const src = await readDataURL(file); const img = new Image(); img.src = src; await img.decode();
   const s = Math.min(img.naturalWidth, img.naturalHeight), sx = (img.naturalWidth - s) / 2, sy = (img.naturalHeight - s) / 2;
-  const c = document.createElement("canvas"); c.width = c.height = 160;
-  const g = c.getContext("2d"); g.fillStyle = "#222"; g.fillRect(0,0,160,160); g.drawImage(img, sx, sy, s, s, 0, 0, 160, 160);
-  for (const q of [0.85, 0.7, 0.55]){ const d = c.toDataURL("image/jpeg", q); if (d.length < 45000) return d; }
+  for (const side of [400, 320, 240]){
+    const c = document.createElement("canvas"); c.width = c.height = side;
+    const g = c.getContext("2d"); g.fillStyle = "#222"; g.fillRect(0,0,side,side); g.drawImage(img, sx, sy, s, s, 0, 0, side, side);
+    const b = await encodeBest(c, 40000);
+    if (b){ const d = await blobToDataURL(b); if (d.length < 58000) return d; }
+  }
   throw new Error("Poza e prea mare.");
 }
 function renderPreview(){
@@ -1118,4 +1249,383 @@ function renderKeys(){
         b.disabled = true; try { await D.deleteKey(k.hash); } catch(e){ b.disabled = false; writeErr(e); }
       }}) : null);
   }));
+}
+
+// =====================================================================
+// ---------- VOICE: 1-on-1 calls + group voice channels (pure WebRTC) ----------
+// Firestore only carries the handshake (offer/answer/ICE). Audio flows peer-to-peer,
+// encrypted end-to-end by WebRTC (DTLS-SRTP). Free Google STUN servers, no accounts, no minute limits.
+// =====================================================================
+const RTC_CFG = { iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }] };
+const voice = { room: null, peers: new Map(), stream: null, muted: false, deaf: false, unsubs: [], joinedAt: 0 };
+const call = { pair: null, other: null, pc: null, stream: null, audio: null, role: null, state: null, unsubs: [], timer: null, tick: null, started: 0, muted: false, iceQ: [] };
+const voiceSpeaking = new Set();
+let voiceRooms = [], voiceRoster = {}, rosterUnsubs = {};
+
+function micErr(e){
+  const n = e && e.name;
+  const msg = (n === "NotAllowedError" || n === "SecurityError")
+      ? (D.isDesktopApp ? "Microfonul e blocat. În Windows: Setări → Confidențialitate și securitate → Microfon → pornește „Acces la microfon” și „Permite aplicațiilor desktop să acceseze microfonul”, apoi repornește FolkChat."
+        : D.isNative ? "FolkChat nu are voie la microfon. Deschide Setări → Aplicații → FolkChat → Permisiuni → Microfon → Permite."
+        : "Browserul a blocat microfonul. Apasă pe lacătul din bara de adrese → Microfon → Permite, apoi încearcă din nou.")
+    : (n === "NotFoundError" || n === "OverconstrainedError") ? "Nu am găsit niciun microfon. Conectează unul și încearcă din nou."
+    : n === "NotReadableError" ? "Microfonul e folosit de altă aplicație (Discord, Zoom…). Închide-o și încearcă din nou."
+    : "Microfonul nu merge aici (" + (n || "eroare necunoscută") + ").";
+  return new Error(msg);
+}
+async function getMic(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw micErr({ name: "NotSupportedError" });
+  try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
+  catch(e){ throw micErr(e); }
+}
+function micAlert(e){ flash(e.message || "Microfonul nu merge.", true); }
+
+// ---- speaking detection (green ring) ----
+let vctx = null; const meters = new Map(); let meterTimer = null;
+function meterCtx(){ if (!vctx){ const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; vctx = new C(); } if (vctx.state === "suspended") vctx.resume().catch(() => {}); return vctx; }
+function addMeter(id, stream){
+  const ctx = meterCtx(); if (!ctx) return;
+  removeMeter(id);
+  try {
+    const src = ctx.createMediaStreamSource(stream), an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an);
+    meters.set(id, { src, an, buf: new Uint8Array(an.fftSize), hot: 0 });
+  } catch(e){ return; }
+  if (!meterTimer) meterTimer = setInterval(tickMeters, 120);
+}
+function removeMeter(id){ const m = meters.get(id); if (m){ try { m.src.disconnect(); } catch(e){} meters.delete(id); } if (voiceSpeaking.delete(id)) paintSpeaking(); if (!meters.size && meterTimer){ clearInterval(meterTimer); meterTimer = null; } }
+function tickMeters(){
+  let changed = false;
+  for (const [id, m] of meters){
+    m.an.getByteTimeDomainData(m.buf);
+    let sum = 0; for (let i = 0; i < m.buf.length; i++){ const v = (m.buf[i] - 128) / 128; sum += v * v; }
+    const rms = Math.sqrt(sum / m.buf.length);
+    const silent = (id === uid && (voice.muted || call.muted));
+    m.hot = (!silent && rms > 0.035) ? 4 : Math.max(0, m.hot - 1);
+    const on = m.hot > 0;
+    if (on !== voiceSpeaking.has(id)){ on ? voiceSpeaking.add(id) : voiceSpeaking.delete(id); changed = true; }
+  }
+  if (changed) paintSpeaking();
+}
+function paintSpeaking(){
+  for (const el of document.querySelectorAll("[data-vu]")) el.classList.toggle("speaking", voiceSpeaking.has(el.dataset.vu));
+}
+function playRemote(id, stream, deaf){
+  let a = document.getElementById("ra-" + id);
+  if (!a){ a = h("audio",{id:"ra-" + id, autoplay:"", playsinline:""}); a.style.display = "none"; document.body.append(a); }
+  a.srcObject = stream; a.muted = !!deaf; a.play().catch(() => {});
+  addMeter(id, stream);
+  return a;
+}
+function stopRemote(id){ const a = document.getElementById("ra-" + id); if (a){ a.srcObject = null; a.remove(); } removeMeter(id); }
+
+// ---- ringtone / ringback (Web Audio, no files) ----
+let ringTimer = null;
+function ring(kind){
+  stopRing();
+  const once = () => {
+    const ctx = meterCtx(); if (!ctx) return;
+    const t0 = ctx.currentTime, g = ctx.createGain(); g.connect(ctx.destination);
+    const vol = Math.max(0.15, settings.volume) * (kind === "in" ? 0.35 : 0.18);
+    const notes = kind === "in" ? [[880,0,.18],[1100,.2,.18],[880,.45,.18],[1100,.65,.18]] : [[440,0,.9]];
+    for (const [f, at, d] of notes){
+      const o = ctx.createOscillator(), og = ctx.createGain(); o.type = "sine"; o.frequency.value = f;
+      og.gain.setValueAtTime(0.0001, t0 + at); og.gain.exponentialRampToValueAtTime(vol, t0 + at + 0.02); og.gain.exponentialRampToValueAtTime(0.0001, t0 + at + d);
+      o.connect(og); og.connect(g); o.start(t0 + at); o.stop(t0 + at + d + 0.05);
+    }
+  };
+  once(); ringTimer = setInterval(once, kind === "in" ? 2000 : 3000);
+}
+function stopRing(){ if (ringTimer){ clearInterval(ringTimer); ringTimer = null; } }
+
+// =========================== 1-on-1 calls ===========================
+function callUI(){
+  let bar = $("callBar");
+  if (!call.pair){ if (bar) bar.remove(); renderChatHeader(); return; }
+  if (!bar){ bar = h("div",{id:"callBar",class:"callbar"}); document.body.append(bar); }
+  const p = P(call.other) || {};
+  const secs = call.started ? Math.floor((Date.now() - call.started) / 1000) : 0;
+  const status = call.state === "active" ? "Conectat · " + z(Math.floor(secs / 60)) + ":" + z(secs % 60) : call.role === "caller" ? "Sună…" : "Se conectează…";
+  const av = avatar(call.other,"sm"); av.dataset.vu = call.other;
+  bar.replaceChildren(av, h("div",{class:"grow",style:"min-width:0"}, h("b",{text:p.tag || "?"}), h("div",{class:"note",style:"font-size:12px",text:"📞 " + status})),
+    h("button",{type:"button",class:"icon" + (call.muted ? " off" : ""),title: call.muted ? "Pornește microfonul" : "Oprește microfonul","aria-label":"Microfon",text: call.muted ? "🔇" : "🎤",onclick:() => { call.muted = !call.muted; if (call.stream) call.stream.getAudioTracks().forEach(t => t.enabled = !call.muted); callUI(); }}),
+    h("button",{type:"button",class:"hang",title:"Închide","aria-label":"Închide apelul",text:"Închide",onclick:() => hangUp()}));
+  paintSpeaking(); renderChatHeader();
+}
+function newCallPC(){
+  const pc = new RTCPeerConnection(RTC_CFG);
+  call.stream.getTracks().forEach(t => pc.addTrack(t, call.stream));
+  pc.onicecandidate = e => { if (e.candidate && call.pair) D.addCallIce(call.pair, e.candidate.toJSON()).catch(() => {}); };
+  pc.ontrack = e => { call.audio = playRemote(call.other, e.streams[0] || new MediaStream([e.track]), false); };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === "connected" && call.state !== "active"){ call.state = "active"; call.started = Date.now(); stopRing(); callUI(); }
+    if (pc.connectionState === "connected" && !call.started){ call.started = Date.now(); }
+    if (pc.connectionState === "failed"){ flash("Apelul nu s-a putut conecta (rețea blocată).", true); hangUp(); }
+  };
+  return pc;
+}
+function watchIce(){
+  call.unsubs.push(D.watchCallIce(call.pair, list => {
+    for (const x of list){ if (x.from === uid) continue; let c; try { c = JSON.parse(x.c); } catch(e){ continue; }
+      if (call.pc && call.pc.remoteDescription) call.pc.addIceCandidate(c).catch(() => {}); else call.iceQ.push(c); }
+  }));
+}
+async function flushIce(){ const q = call.iceQ.splice(0); for (const c of q) await call.pc.addIceCandidate(c).catch(() => {}); }
+async function startCallTo(other){
+  if (call.pair){ flash("Ești deja într-un apel."); return; }
+  if (!P(other) || other === uid) return;
+  let stream; try { stream = await getMic(); } catch(e){ micAlert(e); return; }
+  if (voice.room) await leaveVoice();
+  const pair = D.dmId(other).slice(3);
+  Object.assign(call, { pair, other, role: "caller", state: "ringing", stream, muted: false, started: 0, iceQ: [], unsubs: [] });
+  presenceSet(true);
+  try {
+    call.pc = newCallPC();
+    const offer = await call.pc.createOffer(); await call.pc.setLocalDescription(offer);
+    await D.startCall(pair, other, offer);
+  } catch(e){ cleanupCall(); writeErr(e); return; }
+  ring("out"); callUI();
+  D.pushNotify({ type: "call", cid: pair });
+  call.unsubs.push(D.watchCall(pair, async c => {
+    if (!c){ if (call.pair === pair){ const was = call.state; cleanupCall(); flash(was === "active" ? "Apel încheiat." : "Nu a răspuns sau a respins apelul."); } return; }
+    if (c.state === "active" && c.answer && call.pc && !call.pc.remoteDescription){
+      try { await call.pc.setRemoteDescription(c.answer); await flushIce(); } catch(e){}
+      call.state = "active"; call.started = Date.now(); stopRing(); callUI();
+    }
+  }));
+  watchIce();
+  call.timer = setTimeout(() => { if (call.pair === pair && call.state === "ringing"){ D.endCall(pair); cleanupCall(); flash("Nu a răspuns."); } }, 30000);
+  call.tick = setInterval(() => { if (call.state === "active") callUI(); }, 1000);
+}
+// incoming
+let incoming = null;
+function initCalls(){
+  unsubs.push(D.watchIncomingCalls(list => {
+    const now = Date.now();
+    const ringing = list.find(c => c.state === "ringing" && c.caller !== uid && profiles[c.caller] && now - c.ts < 45000 && c.id !== call.pair);
+    if (ringing && (!incoming || incoming.id !== ringing.id)) showIncoming(ringing);
+    if (!ringing && incoming) hideIncoming();
+  }));
+}
+function showIncoming(c){
+  incoming = c;
+  const p = P(c.caller) || {};
+  let el = $("incomingCall"); if (el) el.remove();
+  el = h("div",{id:"incomingCall",class:"incoming"},
+    h("span",{class:"av lg ringing",style:"border-color:" + accent(p)}, p.avatar ? h("img",{src:p.avatar,alt:"",class:"av-img"}) : (p.emoji || "❔")),
+    h("div",{class:"grow"}, h("div",{class:"note",style:"font-size:12px",text:"📞 Apel de la"}), h("b",{style:"font-size:18px",text:p.tag || "?"})),
+    h("button",{type:"button",class:"decline",text:"Respinge",onclick:() => { const id = c.id; hideIncoming(); D.endCall(id); }}),
+    h("button",{type:"button",class:"accept",text:"Răspunde",onclick:() => answer(c)}));
+  document.body.append(el);
+  ring("in");
+  if (settings.notify && "Notification" in window && Notification.permission === "granted" && document.hidden){
+    try { const n = new Notification("📞 " + (p.tag || "Cineva") + " te sună", { body: "Deschide FolkChat ca să răspunzi", tag: "call-" + c.id, requireInteraction: true }); n.onclick = () => { window.focus(); n.close(); }; } catch(e){}
+  }
+  clearTimeout(showIncoming.t); showIncoming.t = setTimeout(() => { if (incoming && incoming.id === c.id) hideIncoming(); }, 32000);
+}
+function hideIncoming(){ incoming = null; stopRing(); const el = $("incomingCall"); if (el) el.remove(); }
+async function answer(c){
+  hideIncoming();
+  if (call.pair) hangUp(true);
+  let stream; try { stream = await getMic(); } catch(e){ micAlert(e); D.endCall(c.id); return; }
+  if (voice.room) await leaveVoice();
+  Object.assign(call, { pair: c.id, other: c.caller, role: "callee", state: "connecting", stream, muted: false, started: 0, iceQ: [], unsubs: [] });
+  presenceSet(true);
+  try {
+    call.pc = newCallPC();
+    await call.pc.setRemoteDescription(c.offer);
+    const ans = await call.pc.createAnswer(); await call.pc.setLocalDescription(ans);
+    await D.answerCall(c.id, ans);
+    await flushIce();
+  } catch(e){ cleanupCall(); flash("Apelul s-a încheiat înainte să răspunzi.", true); return; }
+  call.state = "active"; call.started = Date.now(); callUI();
+  watchIce();
+  call.unsubs.push(D.watchCall(c.id, x => { if (!x && call.pair === c.id){ cleanupCall(); flash("Apel încheiat."); } }));
+  call.tick = setInterval(() => { if (call.state === "active") callUI(); }, 1000);
+}
+function hangUp(silent){ const pair = call.pair; if (!pair) return; cleanupCall(); D.endCall(pair); if (!silent) flash("Apel încheiat."); }
+function cleanupCall(){
+  stopRing(); clearTimeout(call.timer); clearInterval(call.tick);
+  for (const u of call.unsubs) try { u(); } catch(e){}
+  if (call.pc) try { call.pc.close(); } catch(e){}
+  if (call.stream) call.stream.getTracks().forEach(t => t.stop());
+  if (call.other) stopRemote(call.other);
+  Object.assign(call, { pair: null, other: null, pc: null, stream: null, audio: null, role: null, state: null, unsubs: [], timer: null, tick: null, started: 0, iceQ: [] });
+  presenceSet(!document.hidden);
+  callUI();
+}
+
+// ======================= group voice channels =======================
+function initVoice(){
+  initCalls();
+  unsubs.push(D.watchVoiceRooms(list => {
+    voiceRooms = list.sort((a,b) => (a.pos||0) - (b.pos||0));
+    if (!voiceRooms.length && isAdmin && !initVoice.made){ initVoice.made = true; D.createVoiceRoom("general", { name: "General", emoji: "🔊", pos: 0 }).catch(() => {}); }
+    for (const r of voiceRooms) if (!rosterUnsubs[r.id]) rosterUnsubs[r.id] = D.watchVoicePeers(r.id, peers => { voiceRoster[r.id] = peers; onRoster(r.id); });
+    for (const id of Object.keys(rosterUnsubs)) if (!voiceRooms.find(r => r.id === id)){ rosterUnsubs[id](); delete rosterUnsubs[id]; delete voiceRoster[id]; if (voice.room === id) leaveVoice(); }
+    renderVoice();
+  }));
+}
+function onRoster(room){
+  if (voice.room === room){
+    const ids = new Set((voiceRoster[room] || []).map(p => p.id));
+    for (const id of [...voice.peers.keys()]) if (!ids.has(id)) dropPeer(id);
+    if (!ids.has(uid) && Date.now() - voice.joinedAt > 5000){ leaveVoice(true); flash("Ai fost deconectat de la canalul vocal."); }
+  }
+  renderVoice();
+}
+function vpc(other, initiator){
+  const room = voice.room, pc = new RTCPeerConnection(RTC_CFG);
+  const entry = { pc, iceQ: [] };
+  voice.peers.set(other, entry);
+  voice.stream.getTracks().forEach(t => pc.addTrack(t, voice.stream));
+  pc.onicecandidate = e => { if (e.candidate && voice.room === room) D.sendVoiceSig(room, other, "ice", e.candidate.toJSON()).catch(() => {}); };
+  pc.ontrack = e => playRemote(other, e.streams[0] || new MediaStream([e.track]), voice.deaf);
+  pc.onconnectionstatechange = () => { if (pc.connectionState === "failed" || pc.connectionState === "closed") stopRemote(other); };
+  if (initiator) (async () => {
+    try { const o = await pc.createOffer(); await pc.setLocalDescription(o); await D.sendVoiceSig(room, other, "offer", { type: o.type, sdp: o.sdp }); } catch(e){}
+  })();
+  return entry;
+}
+function dropPeer(id){ const e = voice.peers.get(id); if (e){ try { e.pc.close(); } catch(x){} voice.peers.delete(id); } stopRemote(id); }
+async function onSig(msgs){
+  for (const s of msgs){
+    D.delRef(s.ref);
+    if (!voice.room) continue;
+    const ts = s.ts && s.ts.toMillis ? s.ts.toMillis() : Date.now();
+    if (ts < voice.joinedAt - 10000) continue;        // left over from an older session
+    let data; try { data = JSON.parse(s.data); } catch(e){ continue; }
+    let e = voice.peers.get(s.from);
+    try {
+      if (s.kind === "offer"){
+        if (e) dropPeer(s.from);
+        e = vpc(s.from, false);
+        await e.pc.setRemoteDescription(data);
+        const a = await e.pc.createAnswer(); await e.pc.setLocalDescription(a);
+        await D.sendVoiceSig(voice.room, s.from, "answer", { type: a.type, sdp: a.sdp });
+        for (const c of e.iceQ.splice(0)) await e.pc.addIceCandidate(c).catch(() => {});
+      } else if (s.kind === "answer" && e){
+        await e.pc.setRemoteDescription(data);
+        for (const c of e.iceQ.splice(0)) await e.pc.addIceCandidate(c).catch(() => {});
+      } else if (s.kind === "ice"){
+        if (!e){ e = { pc: null, iceQ: [] }; }
+        if (e.pc && e.pc.remoteDescription) await e.pc.addIceCandidate(data).catch(() => {}); else e.iceQ.push(data);
+        if (!voice.peers.has(s.from) && !e.pc) voice.peers.set(s.from, e);
+      }
+    } catch(err){}
+  }
+}
+async function joinVoice(room){
+  if (voice.room === room) return;
+  if (call.pair){ flash("Închide întâi apelul."); return; }
+  let stream; try { stream = await getMic(); } catch(e){ micAlert(e); return; }
+  if (voice.room) await leaveVoice(true);
+  Object.assign(voice, { room, stream, joinedAt: Date.now(), peers: new Map() });
+  stream.getAudioTracks().forEach(t => t.enabled = !voice.muted && !voice.deaf);
+  addMeter(uid, stream);
+  await D.clearMySigs(room);
+  try { await D.setVoicePeer(room, voice.muted, voice.deaf); }
+  catch(e){ voice.room = null; stream.getTracks().forEach(t => t.stop()); removeMeter(uid); writeErr(e); return; }
+  presenceSet(true);
+  voice.unsubs.push(D.watchVoiceSig(room, onSig));
+  // The newcomer calls everybody already in the room (so two people never call each other at the same time).
+  for (const p of (voiceRoster[room] || [])) if (p.id !== uid && profiles[p.id]) vpc(p.id, true);
+  playSfx("join", true); renderVoice();
+}
+async function leaveVoice(silent){
+  const room = voice.room; if (!room) return;
+  for (const id of [...voice.peers.keys()]) dropPeer(id);
+  for (const u of voice.unsubs) try { u(); } catch(e){}
+  voice.unsubs = [];
+  if (voice.stream) voice.stream.getTracks().forEach(t => t.stop());
+  removeMeter(uid);
+  voice.room = null; voice.stream = null;
+  D.leaveVoicePeer(room).catch(() => {}); D.clearMySigs(room);
+  presenceSet(!document.hidden);
+  if (!silent) playSfx("react", true);
+  renderVoice();
+}
+function setVoiceFlags(muted, deaf){
+  voice.muted = muted; voice.deaf = deaf;
+  if (voice.stream) voice.stream.getAudioTracks().forEach(t => t.enabled = !muted && !deaf);
+  for (const id of voice.peers.keys()){ const a = document.getElementById("ra-" + id); if (a) a.muted = deaf; }
+  if (voice.room) D.setVoicePeer(voice.room, muted, deaf).catch(() => {});
+  renderVoice();
+}
+function voiceRoomModal(r){
+  const name = h("input",{maxlength:"24",placeholder:"ex. Gaming"}); name.value = r ? r.name : "";
+  const emo = h("input",{maxlength:"8",placeholder:"🔊"}); emo.value = r ? (r.emoji || "") : "🔊";
+  const err = h("div",{class:"err"});
+  openModal(h("div",{class:"modal small"},
+    h("button",{class:"close",type:"button","aria-label":"Închide",text:"✕",onclick:closeProfile}),
+    h("div",{class:"bd",style:"margin-top:0;padding-top:20px"},
+      h("h3",{style:"margin:0 0 10px",text: r ? "Editează canalul vocal" : "Canal vocal nou"}),
+      h("label",{text:"Nume"}), name, h("label",{text:"Emoji"}), emo, err,
+      h("div",{class:"row",style:"margin-top:14px"},
+        r ? h("button",{type:"button",class:"danger-btn",text:"Șterge",onclick:ev => { const b = ev.currentTarget; if (b.dataset.sure !== "1"){ b.dataset.sure = "1"; b.textContent = "Sigur?"; return; } D.deleteVoiceRoom(r.id).then(closeProfile).catch(writeErr); }}) : null,
+        h("span",{class:"grow"}),
+        h("button",{type:"button",class:"primary",text:"Salvează",onclick:async () => {
+          const n = name.value.trim(); if (!n){ err.textContent = "Scrie un nume."; return; }
+          const id = r ? r.id : (n.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || "voce") + "-" + Math.random().toString(36).slice(2,6);
+          try { await D.createVoiceRoom(id, { name: n.slice(0,24), emoji: emo.value.trim().slice(0,8), pos: r ? (r.pos || 0) : voiceRooms.length }); closeProfile(); } catch(e){ writeErr(e); }
+        }})))));
+  setTimeout(() => name.focus(), 30);
+}
+function renderVoice(){
+  const box = $("voiceList"); if (!box || !me) return;
+  $("voiceAdd").classList.toggle("hidden", !isAdmin);
+  box.replaceChildren(...voiceRooms.map(r => {
+    const peers = (voiceRoster[r.id] || []).filter(p => profiles[p.id]);
+    const here = voice.room === r.id;
+    return h("div",{class:"vroom"},
+      h("div",{class:"ch" + (here ? " on" : ""),onclick:() => joinVoice(r.id),title: here ? "Ești conectat" : "Intră în canalul vocal"},
+        h("span",{class:"ch-ico",text:r.emoji || "🔊"}), h("span",{class:"ch-name grow",text:r.name}),
+        peers.length ? h("span",{class:"note",style:"font-size:11.5px",text:String(peers.length)}) : null,
+        isAdmin ? h("button",{type:"button",class:"ch-edit",title:"Editează","aria-label":"Editează canalul vocal",text:"⚙",onclick:ev => { ev.stopPropagation(); voiceRoomModal(r); }}) : null),
+      peers.length ? h("div",{class:"vpeers"}, peers.map(p => {
+        const av = avatar(p.id,"xs"); av.dataset.vu = p.id; if (voiceSpeaking.has(p.id)) av.classList.add("speaking");
+        return h("div",{class:"vpeer",title:(P(p.id)||{}).tag}, av, h("span",{class:"grow vpn",text:(P(p.id)||{}).tag}),
+          p.muted ? h("span",{title:"Microfon oprit",text:"🔇"}) : null, p.deaf ? h("span",{title:"Sunet oprit",text:"🙉"}) : null,
+          isAdmin && p.id !== uid ? h("button",{type:"button",class:"ch-edit",title:"Scoate din canal","aria-label":"Scoate din canal",text:"✕",onclick:ev => { ev.stopPropagation(); D.kickVoicePeer(r.id, p.id).catch(writeErr); }}) : null);
+      })) : null);
+  }), ...(voiceRooms.length ? [] : [h("div",{class:"note",style:"padding:4px 10px 8px;font-size:12.5px",text: isAdmin ? "Se creează canalul 🔊 General…" : "Niciun canal vocal încă."})]));
+  const panel = $("voicePanel");
+  if (!voice.room){ panel.classList.add("hidden"); panel.replaceChildren(); paintSpeaking(); return; }
+  const r = voiceRooms.find(x => x.id === voice.room) || { name: "?" };
+  panel.classList.remove("hidden");
+  panel.replaceChildren(
+    h("div",{class:"vp-top"}, h("span",{class:"vp-dot"}), h("div",{class:"grow",style:"min-width:0"}, h("b",{class:"vp-ok",text:"Conectat la voce"}), h("div",{class:"note",style:"font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis",text:(r.emoji || "🔊") + " " + r.name + " · " + voice.peers.size + " conexiuni"}))),
+    h("div",{class:"vp-btns"},
+      h("button",{type:"button",class:voice.muted ? "off" : "",title:"Microfon",text:(voice.muted ? "🔇" : "🎤") + " Microfon",onclick:() => setVoiceFlags(!voice.muted, voice.deaf)}),
+      h("button",{type:"button",class:voice.deaf ? "off" : "",title:"Sunet",text:(voice.deaf ? "🙉" : "🎧") + " Sunet",onclick:() => setVoiceFlags(voice.muted, !voice.deaf)}),
+      h("button",{type:"button",class:"hang",title:"Deconectare",text:"Deconectare",onclick:() => leaveVoice()})));
+  paintSpeaking();
+}
+
+// =========================== push notifications ===========================
+let pushStarted = false;
+async function initPush(){
+  if (pushStarted || !me) return; pushStarted = true;
+  const PN = D.plugin("PushNotifications");
+  if (PN){   // Android app
+    try {
+      await PN.createChannel({ id: "messages", name: "Mesaje", description: "Mesaje private și mențiuni", importance: 4, visibility: 1, vibration: true }).catch(() => {});
+      await PN.createChannel({ id: "calls", name: "Apeluri", description: "Apeluri primite", importance: 5, visibility: 1, vibration: true }).catch(() => {});
+      let st = await PN.checkPermissions();
+      if (st.receive === "prompt" || st.receive === "prompt-with-rationale") st = await PN.requestPermissions();
+      if (st.receive !== "granted") return;
+      await PN.addListener("registration", t => D.saveDeviceToken(t.value).catch(() => {}));
+      await PN.addListener("pushNotificationActionPerformed", a => {
+        const d = (a && a.notification && a.notification.data) || {};
+        if (d.cid){ location.hash = "#chat"; selectChannel(d.type === "mention" ? d.cid : "dm:" + d.cid); }
+      });
+      await PN.register();
+    } catch(e){}
+    return;
+  }
+  maybeWebPush();
+}
+async function maybeWebPush(){
+  if (!VAPID_KEY || D.isDesktopApp || !("serviceWorker" in navigator) || !("Notification" in window)) return;
+  if (!settings.notify || Notification.permission !== "granted") return;
+  try { const t = await D.enableWebPush(VAPID_KEY); if (t) await D.saveDeviceToken(t); } catch(e){}
 }
