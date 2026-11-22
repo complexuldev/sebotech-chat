@@ -1,5 +1,5 @@
 // FolkChat – app UI. All user text is rendered with textContent (no HTML injection).
-import * as D from "./data.js?v=15";
+import * as D from "./data.js?v=16";
 import { OWNER_EMAIL, KLIPY_KEY, MEDIA_URL, VAPID_KEY } from "./config.js?v=12";
 
 const EMOJIS = ["😎","🐱","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
@@ -173,6 +173,7 @@ $("gateForm").addEventListener("submit", async ev => {
 // ---------- app ----------
 function startApp(){
   if (started) return; started = true;
+  D.hubStart();
   showScreen("loading");
   const bootTimer = setTimeout(() => { $("loadingMsg").textContent = "Încă mă conectez… verifică internetul."; }, 10000);
   // Paint instantly from the cached member list, then keep it live with ONE listener.
@@ -1875,7 +1876,8 @@ function renderKeys(){
 // Firestore only carries the handshake (offer/answer/ICE). Audio flows peer-to-peer,
 // encrypted end-to-end by WebRTC (DTLS-SRTP). Free Google STUN servers, no accounts, no minute limits.
 // =====================================================================
-const RTC_CFG = { iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }] };
+// STUN only tells each device its public address so friends can connect directly (no audio passes through it).
+const RTC_CFG = { iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }] };
 const voice = { room: null, peers: new Map(), stream: null, muted: false, deaf: false, unsubs: [], joinedAt: 0 };
 const call = { pair: null, other: null, pc: null, stream: null, audio: null, role: null, state: null, unsubs: [], timer: null, tick: null, started: 0, muted: false, iceQ: [] };
 const voiceSpeaking = new Set();
@@ -2233,8 +2235,25 @@ function sharePrep(pc, other, offerer){
   if (offerer){
     pc.__vt = pc.addTransceiver("video", { direction: "sendrecv" });
     pc.__at = pc.addTransceiver("audio", { direction: "sendrecv" });
+    preferVideoCodecs(pc.__vt);
     shareAttach(pc);
   }
+}
+// Prefer H.264 (graphics-card encoding on most PCs → sharper picture, less load on your game), then VP9, VP8.
+// Both sides list the same order; if one can't do H.264 they simply agree on the next one.
+function preferVideoCodecs(t){
+  try {
+    if (!t || !t.setCodecPreferences || !window.RTCRtpReceiver || !RTCRtpReceiver.getCapabilities) return;
+    const caps = RTCRtpReceiver.getCapabilities("video"); if (!caps || !caps.codecs) return;
+    const extra = c => /rtx|red|ulpfec|flexfec/i.test(c.mimeType);
+    const rank = c => {
+      const m = c.mimeType.toLowerCase(), f = c.sdpFmtpLine || "";
+      if (m === "video/h264") return /packetization-mode=1/.test(f) ? (/profile-level-id=64/i.test(f) ? 0 : /profile-level-id=4d/i.test(f) ? 1 : 2) : 3;
+      return ({ "video/vp9": 4, "video/vp8": 5, "video/av1": 6 })[m] || 7;
+    };
+    const media = caps.codecs.filter(c => !extra(c)).sort((a, b) => rank(a) - rank(b));
+    t.setCodecPreferences(media.concat(caps.codecs.filter(extra)));
+  } catch(e){}
 }
 // answerer: after setRemoteDescription(offer), before createAnswer()
 function shareAnswerPrep(pc){
@@ -2242,6 +2261,7 @@ function shareAnswerPrep(pc){
   pc.__vt = ts.find(t => t.receiver.track.kind === "video");
   pc.__at = ts.find(t => t.receiver.track.kind === "audio" && t.mid !== "0");
   for (const t of [pc.__vt, pc.__at]) if (t) t.direction = "sendrecv";
+  preferVideoCodecs(pc.__vt);
   shareAttach(pc);
 }
 // remote tracks: mid 0 is the microphone, the rest are screen video / screen audio
@@ -2259,9 +2279,15 @@ function shareAttach(pc){
   const v = share.stream ? share.stream.getVideoTracks()[0] || null : null, a = share.stream ? share.stream.getAudioTracks()[0] || null : null;
   if (pc.__vt){
     pc.__vt.sender.replaceTrack(v).catch(() => {});
-    if (v) try { const p = pc.__vt.sender.getParameters(); if (!p.encodings || !p.encodings.length) p.encodings = [{}]; const q = SHARE_Q[share.q]; p.encodings[0].maxBitrate = q.br; p.encodings[0].maxFramerate = q.fps; p.degradationPreference = "maintain-framerate"; pc.__vt.sender.setParameters(p).catch(() => {}); } catch(e){}
+    if (v) try { const p = pc.__vt.sender.getParameters(); if (!p.encodings || !p.encodings.length) p.encodings = [{}]; const q = SHARE_Q[share.q]; p.encodings[0].maxBitrate = q.br; p.encodings[0].maxFramerate = q.fps;
+      // games (60 fps): keep it smooth, lower sharpness if the connection struggles; 30 fps (text, code, sites): keep it sharp
+      p.degradationPreference = q.fps >= 60 ? "maintain-framerate" : "maintain-resolution";
+      pc.__vt.sender.setParameters(p).catch(() => {}); } catch(e){}
   }
-  if (pc.__at) pc.__at.sender.replaceTrack(a).catch(() => {});
+  if (pc.__at){
+    pc.__at.sender.replaceTrack(a).catch(() => {});
+    if (a) try { const p = pc.__at.sender.getParameters(); if (!p.encodings || !p.encodings.length) p.encodings = [{}]; p.encodings[0].maxBitrate = 128000; pc.__at.sender.setParameters(p).catch(() => {}); } catch(e){}
+  }
 }
 function onShareMsg(from, m){
   if (m.t !== "share") return;
@@ -2284,7 +2310,7 @@ async function startShare(){
   try {
     s = await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: SHARE_Q[q].w }, height: { ideal: SHARE_Q[q].h }, frameRate: { ideal: SHARE_Q[q].fps, max: SHARE_Q[q].fps } },
-      audio: Object.assign({ echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      audio: Object.assign({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 } },
         // keep the call itself (friends' voices) out of shared system audio, otherwise they hear themselves
         (navigator.mediaDevices.getSupportedConstraints && navigator.mediaDevices.getSupportedConstraints().restrictOwnAudio) ? { restrictOwnAudio: true, suppressLocalAudioPlayback: false } : {}),
       systemAudio: "include", selfBrowserSurface: "exclude", surfaceSwitching: "include"
@@ -2312,7 +2338,8 @@ function shareLeft(id){ remoteShares.delete(id); if (stageFor === id) closeStage
 function shareReset(){ if (share.stream) stopShare(); remoteShares.clear(); closeStage(); }
 // --- the viewer window (movable, resizable, full screen) ---
 function openStage(id){ stageFor = id; renderStage(); }
-function closeStage(){ stageFor = null; const st = $("stage"); if (st){ const v = st.querySelector("video"); if (v) v.srcObject = null; const a = st.querySelector("audio"); if (a) a.srcObject = null; st.remove(); } }
+let stageStatsT = null;
+function closeStage(){ clearInterval(stageStatsT); stageStatsT = null; stageFor = null; const st = $("stage"); if (st){ const v = st.querySelector("video"); if (v) v.srcObject = null; const a = st.querySelector("audio"); if (a) a.srcObject = null; st.remove(); } }
 function renderStage(){
   if (!stageFor){ closeStage(); return; }
   const mine = stageFor === uid, r = mine ? null : remoteShares.get(stageFor);
@@ -2331,6 +2358,7 @@ function renderStage(){
     h("div",{class:"stage-top"},
       h("span",{class:"drag-h",text:"⠿"}),
       h("b",{class:"grow",style:"white-space:nowrap;overflow:hidden;text-overflow:ellipsis",text:"📺 " + (mine ? "Ecranul tău (previzualizare)" : (p.tag || "?") + " partajează")}),
+      mine ? null : h("span",{class:"stage-q note",id:"stageQ",title:"Ce primești acum (rezoluție · cadre pe secundă · format · întârziere)"}),
       h("button",{type:"button",class:"icon",title:"Ecran complet","aria-label":"Ecran complet",text:"⛶",onclick:() => { const el = video; (el.requestFullscreen ? el.requestFullscreen() : el.webkitEnterFullscreen && el.webkitEnterFullscreen()); }}),
       h("button",{type:"button",class:"icon",title:"Închide","aria-label":"Închide",text:"✕",onclick:closeStage})),
     video];
@@ -2339,8 +2367,25 @@ function renderStage(){
     au.volume = Math.min(1, settings.voice.outVol); if (settings.voice.spkId && au.setSinkId) au.setSinkId(settings.voice.spkId).catch(() => {});
     au.play().catch(() => {}); kids.push(au);
   }
-  st.replaceChildren(...kids);
+  st.replaceChildren(...kids.filter(Boolean));
   video.ondblclick = () => video.requestFullscreen && video.requestFullscreen();
+  clearInterval(stageStatsT); stageStatsT = null;
+  if (!mine) { stageStats(); stageStatsT = setInterval(stageStats, 2000); }
+}
+async function stageStats(){
+  const el = $("stageQ"), id = stageFor; if (!el || !id) return;
+  const pc = (voice.peers.get(id) || {}).pc || (call.other === id ? call.pc : null); if (!pc) return;
+  try {
+    const st = await pc.getStats(); let v = null, codec = "", rtt = null;
+    st.forEach(r => { if (r.type === "inbound-rtp" && r.kind === "video" && pc.__vt && r.trackIdentifier === pc.__vt.receiver.track.id) v = r; });
+    if (!v) st.forEach(r => { if (r.type === "inbound-rtp" && r.kind === "video" && !v) v = r; });
+    if (v && v.codecId){ const c = st.get(v.codecId); if (c) codec = c.mimeType.split("/")[1].toUpperCase(); }
+    st.forEach(r => { if (r.type === "candidate-pair" && r.nominated && r.currentRoundTripTime != null) rtt = Math.round(r.currentRoundTripTime * 1000); });
+    if (!v || !v.frameHeight){ el.textContent = "se încarcă…"; return; }
+    const fps = Math.round(v.framesPerSecond || 0);
+    el.textContent = v.frameHeight + "p · " + fps + " fps" + (codec ? " · " + codec : "") + (rtt != null ? " · " + rtt + " ms" : "");
+    el.style.color = fps && fps < 20 ? "var(--warn, #f5a524)" : "";
+  } catch(e){}
 }
 // buttons shown in the voice panel / call bar
 function shareButtons(){
@@ -2628,7 +2673,7 @@ function newCallPC(){
   call.stream.getTracks().forEach(t => pc.addTrack(t, call.stream));
   tunePC(pc);
   sharePrep(pc, call.other, call.role === "caller");
-  pc.onicecandidate = e => { if (e.candidate && call.pair) D.addCallIce(call.pair, e.candidate.toJSON()).catch(() => {}); };
+  pc.onicecandidate = e => { if (e.candidate && call.pair) cIce(call.pair, call.other, e.candidate.toJSON()); };
   pc.ontrack = e => { if (shareOnTrack(call.other, e)) return; call.audio = playRemote(call.other, e.streams[0] || new MediaStream([e.track]), false); };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "connected" && call.state !== "active"){ call.state = "active"; call.started = Date.now(); stopRing(); callUI(); }
@@ -2639,9 +2684,40 @@ function newCallPC(){
 }
 function watchIce(){
   call.unsubs.push(D.watchCallIce(call.pair, list => {
-    for (const x of list){ if (x.from === uid) continue; let c; try { c = JSON.parse(x.c); } catch(e){ continue; }
-      if (call.pc && call.pc.remoteDescription) call.pc.addIceCandidate(c).catch(() => {}); else call.iceQ.push(c); }
+    for (const x of list){ if (x.from === uid) continue; let c; try { c = JSON.parse(x.c); } catch(e){ continue; } callIceIn(c); }
   }));
+}
+function callIceIn(c){ if (call.pc && call.pc.remoteDescription) call.pc.addIceCandidate(c).catch(() => {}); else call.iceQ.push(c); }
+
+// ---- call set-up messages: through the Cloudflare relay when the friend is connected to it, else Firestore ----
+function vSig(room, to, kind, data){
+  const viaDb = () => D.sendVoiceSig(room, to, kind, data).catch(() => {});
+  return D.hubSend(to, { k: "v", room, kind, data }, viaDb) ? Promise.resolve() : viaDb();
+}
+function cIce(pair, to, cand){
+  const viaDb = () => D.addCallIce(pair, cand).catch(() => {});
+  if (!D.hubSend(to, { k: "c", pair, c: cand }, viaDb)) viaDb();
+}
+let hubQ = Promise.resolve();
+D.onHub((from, d) => {
+  if (!d || typeof d !== "object") return;
+  if (d.k === "v" && voice.room && d.room === voice.room)
+    hubQ = hubQ.then(() => onSig([{ from, kind: d.kind, data: JSON.stringify(d.data) }])).catch(() => {});
+  else if (d.k === "c" && call.pair && d.pair === call.pair && from === call.other && d.c) callIceIn(d.c);
+});
+// Screen-share sound: ask for stereo, music-quality Opus on the share's audio line (the mic, mid 0, stays as is).
+function sdpTune(desc){
+  try {
+    const parts = desc.sdp.split(/(?=\r\nm=)/);
+    const out = parts.map(sec => {
+      if (!/^\r?\n?m=audio/.test(sec) || /\r\na=mid:0\r\n/.test(sec + "\r\n")) return sec;
+      const pt = (/a=rtpmap:(\d+) opus\/48000\/2/i.exec(sec) || [])[1]; if (!pt) return sec;
+      const re = new RegExp("(a=fmtp:" + pt + " )([^\\r\\n]*)");
+      const add = p => { const kv = p.split(";").filter(x => !/^(stereo|sprop-stereo|maxaveragebitrate)=/.test(x)); return kv.concat(["stereo=1", "sprop-stereo=1", "maxaveragebitrate=128000"]).join(";"); };
+      return re.test(sec) ? sec.replace(re, (m, a, b) => a + add(b)) : sec.replace(new RegExp("(a=rtpmap:" + pt + " [^\\r\\n]*)"), "$1\r\na=fmtp:" + pt + " stereo=1;sprop-stereo=1;maxaveragebitrate=128000");
+    });
+    return { type: desc.type, sdp: out.join("") };
+  } catch(e){ return desc; }
 }
 async function flushIce(){ const q = call.iceQ.splice(0); for (const c of q) await call.pc.addIceCandidate(c).catch(() => {}); }
 async function startCallTo(other){
@@ -2655,7 +2731,7 @@ async function startCallTo(other){
   presenceSet(true);
   try {
     call.pc = newCallPC();
-    const offer = await call.pc.createOffer(); await call.pc.setLocalDescription(offer);
+    const offer = sdpTune(await call.pc.createOffer()); await call.pc.setLocalDescription(offer);
     await D.startCall(pair, other, offer);
   } catch(e){ cleanupCall(); writeErr(e); return; }
   ring("out"); callUI();
@@ -2710,7 +2786,7 @@ async function answer(c){
     call.pc = newCallPC();
     await call.pc.setRemoteDescription(c.offer);
     shareAnswerPrep(call.pc);
-    const ans = await call.pc.createAnswer(); await call.pc.setLocalDescription(ans);
+    const ans = sdpTune(await call.pc.createAnswer()); await call.pc.setLocalDescription(ans);
     await D.answerCall(c.id, ans);
     await flushIce();
   } catch(e){ cleanupCall(); flash("Apelul s-a încheiat înainte să răspunzi.", true); return; }
@@ -2758,18 +2834,18 @@ function vpc(other, initiator){
   voice.stream.getTracks().forEach(t => pc.addTrack(t, voice.stream));
   tunePC(pc);
   sharePrep(pc, other, initiator);
-  pc.onicecandidate = e => { if (e.candidate && voice.room === room) D.sendVoiceSig(room, other, "ice", e.candidate.toJSON()).catch(() => {}); };
+  pc.onicecandidate = e => { if (e.candidate && voice.room === room) vSig(room, other, "ice", e.candidate.toJSON()); };
   pc.ontrack = e => { if (shareOnTrack(other, e)) return; playRemote(other, e.streams[0] || new MediaStream([e.track]), voice.deaf); };
   pc.onconnectionstatechange = () => { if (pc.connectionState === "failed" || pc.connectionState === "closed") stopRemote(other); };
   if (initiator) (async () => {
-    try { const o = await pc.createOffer(); await pc.setLocalDescription(o); await D.sendVoiceSig(room, other, "offer", { type: o.type, sdp: o.sdp }); } catch(e){}
+    try { const o = sdpTune(await pc.createOffer()); await pc.setLocalDescription(o); await vSig(room, other, "offer", { type: o.type, sdp: o.sdp }); } catch(e){}
   })();
   return entry;
 }
 function dropPeer(id){ const e = voice.peers.get(id); if (e){ try { e.pc.close(); } catch(x){} voice.peers.delete(id); } stopRemote(id); shareLeft(id); }
 async function onSig(msgs){
   for (const s of msgs){
-    D.delRef(s.ref);
+    if (s.ref) D.delRef(s.ref);
     if (!voice.room) continue;
     const ts = s.ts && s.ts.toMillis ? s.ts.toMillis() : Date.now();
     if (ts < voice.joinedAt - 10000) continue;        // left over from an older session
@@ -2781,8 +2857,8 @@ async function onSig(msgs){
         e = vpc(s.from, false);
         await e.pc.setRemoteDescription(data);
         shareAnswerPrep(e.pc);
-        const a = await e.pc.createAnswer(); await e.pc.setLocalDescription(a);
-        await D.sendVoiceSig(voice.room, s.from, "answer", { type: a.type, sdp: a.sdp });
+        const a = sdpTune(await e.pc.createAnswer()); await e.pc.setLocalDescription(a);
+        await vSig(voice.room, s.from, "answer", { type: a.type, sdp: a.sdp });
         for (const c of e.iceQ.splice(0)) await e.pc.addIceCandidate(c).catch(() => {});
       } else if (s.kind === "answer" && e){
         await e.pc.setRemoteDescription(data);
