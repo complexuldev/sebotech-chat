@@ -2323,19 +2323,10 @@ async function startShare(){
   if (vt){ try { vt.contentHint = SHARE_Q[q].fps >= 60 ? "motion" : "detail"; } catch(e){} vt.addEventListener("ended", () => { if (share.stream === s) stopShare(); }); }
   // Sound: Windows "system audio" also contains the call, so friends would hear themselves.
   //  - Windows app: replace it with the app's own capture of everything EXCEPT FolkChat (like Discord);
-  //  - browser: keep it only if the browser confirms it filtered out its own sound; tab audio is always fine.
   let sa = s.getAudioTracks()[0];
   if (sa && nativeWin){
     const nat = await nativeShareAudio();
     if (nat){ s.removeTrack(sa); sa.stop(); s.addTrack(nat); sa = null; }
-  }
-  if (sa){
-    const surf = vt && vt.getSettings ? vt.getSettings().displaySurface : "";
-    const own = sa.getSettings ? sa.getSettings().restrictOwnAudio : undefined;
-    if (surf !== "browser" && own !== true){
-      s.removeTrack(sa); sa.stop();
-      flash("🔇 Sunetul ecranului e oprit: ar fi trimis și vocile din apel (v-ați fi auzit singuri). Pentru sunet, partajează din aplicația FolkChat de Windows sau alege un tab.", true);
-    }
   }
   share.stream = s; share.q = q;
   for (const pc of sharePCs()){ shareAttach(pc); dcSend(pc, { t: "share", on: true, q }); }
