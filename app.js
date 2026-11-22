@@ -1861,7 +1861,7 @@ function voiceSettings(body, toggle, redraw){
       h("div",{class:"row",style:"margin-top:10px;flex-wrap:wrap;gap:10px"}, keyBtn, h("span",{class:"note",style:"font-size:12px",text:"Funcționează când FolkChat e în prim-plan. Pe telefon apare un buton."})),
       h("div",{class:"row",style:"margin-top:10px"}, h("div",{class:"note grow",text:"Întârziere la eliberare"}), dLab), dR) : null,
     h("div",{class:"h2",style:"margin-top:18px",text:"Calitate partajare ecran"}),
-    sel(Object.entries(SHARE_Q).map(([k, q]) => [k, q.label + (k === "720p30" ? " — recomandat" : k === "1080p60" ? " — jocuri, net bun" : "")]), v.shareQ || "720p30", val => set("shareQ", val)),
+    sel(Object.entries(SHARE_Q).map(([k, q]) => [k, q.label + (k === "720p30" ? " — recomandat" : k === "720p60" ? " — jocuri, fluid" : k === "1080p60" ? " — jocuri, net foarte bun" : "")]), v.shareQ || "720p30", val => set("shareQ", val)),
     h("div",{class:"note",style:"font-size:12px;margin-top:4px",text:"Imaginea merge direct de la tine la prieteni (nu prin server). Fiecare prieten care se uită folosește din viteza ta de upload."}),
     h("div",{class:"h2",style:"margin-top:18px",text:"Calitate audio"}),
     sel([["normal","Normală (32 kbps) — date mobile"],["high","Înaltă (64 kbps)"],["max","Maximă (128 kbps) — muzică"]], v.quality, val => set("quality", val, "q")));
@@ -1903,6 +1903,7 @@ function paintSpeaking(){
 // Sharing just puts the screen into those slots with replaceTrack(), so starting/stopping a share
 // needs no new handshake and no Firebase writes. The picture goes directly between the devices.
 const SHARE_Q = { "720p30": { w: 1280, h: 720, fps: 30, br: 2500000, label: "720p · 30 fps" },
+                  "720p60": { w: 1280, h: 720, fps: 60, br: 4000000, label: "720p · 60 fps" },
                   "1080p30": { w: 1920, h: 1080, fps: 30, br: 4500000, label: "1080p · 30 fps" },
                   "1080p60": { w: 1920, h: 1080, fps: 60, br: 7000000, label: "1080p · 60 fps" } };
 const share = { stream: null, q: "720p30" };            // what I'm sharing
@@ -1978,7 +1979,7 @@ async function startShare(){
     return;
   }
   const vt = s.getVideoTracks()[0];
-  if (vt){ try { vt.contentHint = q === "1080p60" ? "motion" : "detail"; } catch(e){} vt.addEventListener("ended", () => { if (share.stream === s) stopShare(); }); }
+  if (vt){ try { vt.contentHint = SHARE_Q[q].fps >= 60 ? "motion" : "detail"; } catch(e){} vt.addEventListener("ended", () => { if (share.stream === s) stopShare(); }); }
   share.stream = s; share.q = q;
   for (const pc of sharePCs()){ shareAttach(pc); dcSend(pc, { t: "share", on: true, q }); }
   renderVoice(); if (call.pair) callUI();
