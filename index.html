@@ -456,7 +456,9 @@
   .vp-btns{display:flex;gap:6px}
   .vp-btns button{flex:1;padding:7px 4px;font-size:12px;border-radius:8px}
   .vp-btns button.off{background:rgba(244,63,94,.15);border-color:rgba(244,63,94,.5)}
-  .vp-btns button.vp-gear{flex:none;width:34px}
+  .vp-btns button.vp-gear{flex:none;width:30px;padding:7px 0}
+  .vp-btns{flex-wrap:wrap}
+  .vp-btns button.hang{flex:1 1 100%;padding:6px 4px}
   .ptt-btn{flex:1;padding:9px 6px;font-size:12.5px;border-radius:8px;touch-action:none;user-select:none;-webkit-user-select:none}
   .ptt-btn.on{background:rgba(74,222,128,.2) !important;border-color:#4ade80 !important;color:#4ade80}
   .seg{display:flex;flex-wrap:wrap;gap:6px}
@@ -535,6 +537,20 @@
   .pt-bar{height:5px;border-radius:99px;background:var(--panel3);margin:5px 0 3px;overflow:hidden}
   .pt-bar i{display:block;height:100%;background:linear-gradient(90deg,#22c55e,#4ade80);border-radius:99px}
   button.danger{border-color:rgba(244,63,94,.5);color:#fb7185}
+  /* screen share */
+  .stage{position:fixed;z-index:75;right:16px;bottom:16px;width:min(560px,calc(100vw - 24px));height:340px;min-width:240px;min-height:170px;display:flex;flex-direction:column;background:#000;border:1px solid var(--line);border-radius:14px;overflow:hidden;resize:both;box-shadow:0 20px 60px rgba(0,0,0,.6);touch-action:none}
+  .stage-top{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel);font-size:13px;cursor:grab;user-select:none}
+  .stage-top .icon{padding:3px 8px}
+  .stage video{flex:1;min-height:0;width:100%;object-fit:contain;background:#000}
+  .stage.dragging{opacity:.9}
+  .watch-row{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .watch-btn{padding:8px 10px;border-radius:9px;font-size:12.5px;font-weight:700;background:rgba(88,101,242,.18) !important;border-color:rgba(88,101,242,.55) !important;text-align:left}
+  .watch-btn.on{background:rgba(74,222,128,.15) !important;border-color:rgba(74,222,128,.5) !important}
+  .callbar .watch-btn{padding:6px 8px;font-size:12px;white-space:nowrap}
+  button.sharing{background:rgba(244,63,94,.18) !important;border-color:rgba(244,63,94,.55) !important}
+  .share-on{display:flex;align-items:center;gap:8px;margin-top:6px;padding:7px 9px;border-radius:9px;background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.35);font-size:12.5px;font-weight:600;cursor:pointer}
+  .share-on .vp-dot{background:#f43f5e;box-shadow:0 0 8px #f43f5e}
+  @media (max-width:760px){ .stage{left:8px;right:8px;width:auto;bottom:calc(80px + var(--sab));height:240px;resize:none} }
   /* weekly leaderboard */
   .lb{border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:14px 16px;margin-bottom:18px}
   .lb-title{font-weight:800;font-size:17px}
@@ -792,6 +808,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=20"></script>
+<script type="module" src="app.js?v=21"></script>
 </body>
 </html>
