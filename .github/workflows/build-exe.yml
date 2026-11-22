@@ -1,10 +1,14 @@
-# Builds the FolkChat Windows app (.msi installer + standalone .exe) with Pake.
-# Runs on every push to main, or by hand: Actions → "Build FolkChat for Windows" → Run workflow.
+# Builds the FolkChat Windows app (desktop/tauri) – a small native shell around the live site with
+# game detection, in-game push-to-talk, a see-through overlay, tray and start-with-Windows.
+# Runs on pushes that touch the Windows app, or by hand: Actions → "Build FolkChat for Windows" → Run workflow.
 name: Build FolkChat for Windows
 
 on:
   push:
     branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/build-exe.yml"
   workflow_dispatch:
 
 permissions:
@@ -18,8 +22,10 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 60
-    env:
-      APP_URL: https://complexuldev.github.io/sebotech-chat/
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: desktop/tauri
     steps:
       - uses: actions/checkout@v4
 
@@ -31,50 +37,40 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: pake-cargo-${{ runner.os }}-v1
+          workspaces: desktop/tauri -> target
 
-      - name: Install Pake
-        run: npm install -g pake-cli@3
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli@2
 
-      - name: Build FolkChat with Pake
-        shell: pwsh
+      - name: App icons
+        run: tauri icon ../icon.png
+
+      - name: Build FolkChat
         run: |
           $version = "1.0.${{ github.run_number }}"
-          # --show-system-tray + --hide-on-close: the X button hides FolkChat next to the clock,
-          #   so it keeps ringing for calls and showing message alerts.
-          # --new-window: lets the Google sign-in popup open inside the app.
-          # --safe-domain: Google / Firebase sign-in pages stay inside the app window.
-          pake "$env:APP_URL" `
-            --name FolkChat `
-            --icon desktop/icon.png `
-            --width 1200 --height 800 `
-            --min-width 420 --min-height 560 `
-            --show-system-tray `
-            --system-tray-icon desktop/icon.png `
-            --hide-on-close `
-            --new-window `
-            --safe-domain "complexuldev.github.io,sebotech-chat.firebaseapp.com,accounts.google.com,apis.google.com" `
-            --enable-drag-drop `
-            --app-version $version `
-            --targets x64 `
-            --keep-binary
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Get-ChildItem -Recurse -Include *.msi,*.exe -File |
-            Where-Object { $_.FullName -notmatch '\\node_modules\\|\\target\\release\\build\\|\\deps\\|\\dist\\' } |
-            ForEach-Object { Write-Host "found $($_.FullName)"; Copy-Item $_.FullName -Destination dist -Force }
-          Get-ChildItem dist | Format-Table Name, Length
-          if (-not (Get-ChildItem dist -Filter *.msi) -and -not (Get-ChildItem dist -Filter *.exe)) { throw "Pake produced no installer" }
-          # friendly, stable file names
-          $msi = Get-ChildItem dist -Filter *.msi | Select-Object -First 1
-          if ($msi) { Rename-Item $msi.FullName "FolkChat-Setup.msi" }
-          $exe = Get-ChildItem dist -Filter *.exe | Sort-Object Length -Descending | Select-Object -First 1
-          if ($exe) { Rename-Item $exe.FullName "FolkChat.exe" }
-          Get-ChildItem dist | Format-Table Name, Length
+          Set-Content -Path version.json -Value ('{"version":"' + $version + '"}') -Encoding utf8NoBOM
+          tauri build --ci --config version.json
+          New-Item -ItemType Directory -Force -Path ../../dist | Out-Null
+          $setup = Get-ChildItem target/release/bundle/nsis -Filter *-setup.exe | Select-Object -First 1
+          if (-not $setup) { throw "no installer was built" }
+          Copy-Item $setup.FullName ../../dist/FolkChat-Setup.exe
+          Copy-Item target/release/folkchat.exe ../../dist/FolkChat.exe
+          Get-ChildItem ../../dist | Format-Table Name, Length
+
+      - name: Measure RAM (login screen, 45 s after start)
+        continue-on-error: true
+        run: |
+          $p = Start-Process -FilePath ../../dist/FolkChat.exe -PassThru
+          Start-Sleep -Seconds 45
+          $kids = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedgewebview2.exe' } | ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
+          $all = @(Get-Process -Id $p.Id -ErrorAction SilentlyContinue) + @($kids)
+          $ws = [math]::Round(($all | Measure-Object WorkingSet64 -Sum).Sum / 1MB)
+          $pv = [math]::Round(($all | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB)
+          $all | Sort-Object WorkingSet64 -Descending | Format-Table ProcessName, Id, @{n='WS MB';e={[math]::Round($_.WorkingSet64/1MB)}}, @{n='Private MB';e={[math]::Round($_.PrivateMemorySize64/1MB)}}
+          echo "::notice title=FolkChat RAM::$($all.Count) processes · working set $ws MB · private $pv MB"
+          $all | Stop-Process -Force -ErrorAction SilentlyContinue
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -89,8 +85,9 @@ jobs:
           tag_name: windows-v1.0.${{ github.run_number }}
           name: FolkChat for Windows 1.0.${{ github.run_number }}
           body: |
-            **Download `FolkChat-Setup.msi`**, open it and follow the installer. (Or use `FolkChat.exe` without installing.)
+            **Download `FolkChat-Setup.exe`** and open it (no admin needed). Or run `FolkChat.exe` without installing.
             Windows may show "Windows protected your PC" because the app isn't code-signed: click **More info → Run anyway**.
+            New in this app: automatic game detection, push-to-talk that works inside games, a see-through overlay over games, start with Windows.
             Closing the window keeps FolkChat running next to the clock so calls and messages still ring — right-click the tray icon to quit.
           files: dist/*
           make_latest: true
