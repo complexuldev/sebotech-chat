@@ -378,7 +378,7 @@ function openGifPicker(anchor, onPick){
   document.body.append(gifPop);
   const r = anchor.getBoundingClientRect();
   gifPop.style.left = Math.max(8, Math.min(window.innerWidth - 348, r.left)) + "px";
-  gifPop.style.bottom = (window.innerHeight - r.top + 8) + "px";
+  if (r.top < 420) gifPop.style.top = (r.bottom + 8) + "px"; else gifPop.style.bottom = (window.innerHeight - r.top + 8) + "px";
   if (!KLIPY_KEY){ grid.replaceChildren(h("div",{class:"note",style:"padding:12px",text:"Căutarea de GIF-uri nu e configurată încă (lipsește cheia KLIPY). Poți totuși atașa un GIF de pe dispozitiv cu 📎."})); return; }
   let t = null, seq = 0;
   async function load(q){
