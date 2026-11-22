@@ -160,7 +160,8 @@ async function upload(req, env, url, cors) {
   if (real !== FAMILY[type]) throw fail(415, "file content does not match its type");
   const kind = ["chat", "post", "dm", "avatar"].includes(url.searchParams.get("kind")) ? url.searchParams.get("kind") : "chat";
   const rand = bytesToB64url(crypto.getRandomValues(new Uint8Array(12)));
-  const key = user.uid + "/" + Date.now().toString(36) + "-" + rand + "." + TYPES[type];
+  // videos go under "v-<uid>/" so a bucket rule can delete them after 3 days; everything else stays
+  const key = (type.startsWith("video/") ? "v-" : "") + user.uid + "/" + Date.now().toString(36) + "-" + rand + "." + TYPES[type];
   await env.MEDIA.put(key, body, {
     httpMetadata: { contentType: type, cacheControl: "public, max-age=31536000, immutable" },
     customMetadata: { uid: user.uid, kind }
@@ -204,7 +205,7 @@ async function remove(req, env, url, cors) {
   const user = await verifyIdToken(req, env);
   const m = KEY_RE.exec(url.pathname);
   if (!m) throw fail(404, "not found");
-  if (m[1] !== user.uid) throw fail(403, "not your file");
+  if (m[1] !== user.uid && m[1] !== "v-" + user.uid) throw fail(403, "not your file");
   await env.MEDIA.delete(m[1] + "/" + m[2]);
   await caches.default.delete(new Request(url.origin + url.pathname)).catch(() => {});
   return json({ ok: true }, 200, cors);
