@@ -253,10 +253,13 @@ function drawUsage(){
   const cat = (ico, name, c, extra) => h("div",{class:"us-cat"}, h("span",{text:ico}), h("span",{class:"grow",text:name + (extra ? " · " + extra : "")}), h("span",{class:"note",text:fmtNum(c && c.n) + " fișiere"}), h("b",{text:fmtBytes(c && c.b)}));
   let fsCard;
   if (fs.error){
+    const billing = /billing/i.test(fs.error || "");
     const why = fs.status === 501 ? "Contul de serviciu Firebase nu e conectat la worker încă (secretul FIREBASE_SA_JSON din GitHub). Tot el pornește și notificările push pe telefon."
+              : billing ? "Google dă cifrele Firebase automat doar pe planul cu card (Blaze), așa că nu le citim aici, ca să rămână totul gratis. Le vezi exact în consola Firebase (butonul de mai jos). Pe planul gratuit (Spark), dacă treci de limită, aplicația doar se oprește până la 10:00, nu te costă nimic."
               : fs.status === 403 ? "Contului de serviciu îi lipsește rolul „Monitoring Viewer” în Google Cloud (IAM)."
               : "Eroare: " + fs.error;
-    fsCard = h("div",{class:"us-card"}, h("div",{class:"us-h",text:"🔥 Firebase (Firestore)"}), h("div",{class:"note",text:why}));
+    const link = h("button",{type:"button",class:"tiny",style:"margin-top:10px",text:"🔗 Deschide utilizarea Firebase",onclick:() => window.open("https://console.firebase.google.com/project/sebotech-chat/firestore/databases/-default-/usage", "_blank")});
+    fsCard = h("div",{class:"us-card"}, h("div",{class:"us-h",text:"🔥 Firebase (Firestore)"}), h("div",{class:"note",text:why}), fs.status === 501 ? null : link);
   } else {
     const L = fs.limits || { reads: 50000, writes: 20000, deletes: 20000 };
     fsCard = h("div",{class:"us-card"},
