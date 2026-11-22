@@ -703,6 +703,7 @@ function attachBox(kind){
   document.body.append(input);
   $(kind + "Attach").onclick = () => input.click();
   $(kind + "Gif").onclick = ev => openGifPicker(ev.currentTarget, g => { st.att = { gif: g }; show(); });
+  $(kind + "Emoji").onclick = ev => openEmojiPicker(ev.currentTarget, $(kind === "chat" ? "chatIn" : "postIn"));
   return { get: () => st.att, set: a => { st.att = a; show(); }, clear: () => { st.att = null; show(); }, useFile };
 }
 // ---------- voice messages + videos ----------
@@ -921,6 +922,73 @@ function openGifPicker(anchor, onPick){
 }
 document.addEventListener("click", e => { if (gifPop && !gifPop.contains(e.target) && !e.target.closest(".gif-btn")) closeGifPicker(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeGifPicker(); });
+
+// ---------- emoji picker (all Unicode emoji, data loaded on first open) ----------
+let emojiPop = null, emojiData = null;
+const TONES = ["", "\u{1F3FB}", "\u{1F3FC}", "\u{1F3FD}", "\u{1F3FE}", "\u{1F3FF}"];
+const toned = (e, t) => { if (!t) return e; const cp = [...e.replace(/️/g, "")]; return cp[0] + t + cp.slice(1).join(""); };
+function emojiRecent(){ try { return JSON.parse(localStorage.getItem("sebo:emojiRecent") || "[]").slice(0, 32); } catch(e){ return []; } }
+function emojiRemember(e){ try { localStorage.setItem("sebo:emojiRecent", JSON.stringify([e].concat(emojiRecent().filter(x => x !== e)).slice(0, 32))); } catch(err){} }
+function insertAtCaret(ta, text){
+  const a = ta.selectionStart ?? ta.value.length, b = ta.selectionEnd ?? ta.value.length;
+  if (ta.maxLength > 0 && ta.value.length - (b - a) + text.length > ta.maxLength) return;
+  ta.value = ta.value.slice(0, a) + text + ta.value.slice(b);
+  ta.selectionStart = ta.selectionEnd = a + text.length;
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+}
+function closeEmojiPicker(){ if (emojiPop){ emojiPop.remove(); emojiPop = null; } }
+async function openEmojiPicker(anchor, ta){
+  if (emojiPop){ closeEmojiPicker(); return; }
+  const grid = h("div",{class:"emo-grid"}), tabs = h("div",{class:"emo-tabs"});
+  const input = h("input",{placeholder:"Caută emoji (ex: fire, heart)…",type:"search"});
+  let tone = Number(localStorage.getItem("sebo:emojiTone") || 0) || 0;
+  const toneBtn = h("button",{type:"button",class:"icon emo-tone",title:"Culoarea pielii"});
+  const foot = h("div",{class:"emo-foot note",text:" "});
+  emojiPop = h("div",{class:"emo-pop"}, h("div",{class:"row",style:"gap:6px"}, h("div",{class:"grow"}, input), toneBtn), tabs, grid, foot);
+  document.body.append(emojiPop);
+  const r = anchor.getBoundingClientRect();
+  emojiPop.style.left = Math.max(8, Math.min(window.innerWidth - 368, r.right - 360)) + "px";
+  if (r.top < 440) emojiPop.style.top = (r.bottom + 8) + "px"; else emojiPop.style.bottom = (window.innerHeight - r.top + 8) + "px";
+  const touch = matchMedia("(pointer:coarse)").matches;
+  if (!touch) input.focus();
+  grid.replaceChildren(h("div",{class:"note",style:"padding:12px",text:"Se încarcă…"}));
+  try { emojiData = emojiData || (await import("./vendor/emoji.js?v=1")).GROUPS.map(([slug, name, ico, rows]) => ({ slug, name, ico, list: rows.split("\n").map(l => { const [e, n, kw, t] = l.split("\t"); return { e, n, k: n + " " + kw, t: !!t }; }) })); }
+  catch(e){ grid.replaceChildren(h("div",{class:"note",style:"padding:12px",text:"Emoji-urile nu s-au putut încărca."})); return; }
+  if (!emojiPop) return;
+  const pick = (x, ev) => {
+    const e = x.t ? toned(x.e, TONES[tone]) : x.e;
+    emojiRemember(x.e + (x.t ? "\t1" : ""));
+    insertAtCaret(ta, e);
+    if (!touch) ta.focus();
+    if (!(ev && ev.shiftKey) && !touch) closeEmojiPicker();
+  };
+  const btn = x => h("button",{type:"button",class:"emo",title:x.n || "",text:x.t ? toned(x.e, TONES[tone]) : x.e,
+    onclick:ev => pick(x, ev), onmouseenter:() => { foot.textContent = (x.t ? toned(x.e, TONES[tone]) : x.e) + "  " + (x.n || ""); }});
+  const recentList = () => emojiRecent().map(v => { const [e, t] = v.split("\t"); const all = emojiData.flatMap(g => g.list); return all.find(x => x.e === e) || { e, n: "", k: "", t: !!t }; });
+  function render(){
+    const q = input.value.trim().toLowerCase();
+    if (q){
+      const words = q.split(/\s+/);
+      const score = x => { const toks = x.k.split(" "); let sc = 0; for (const w of words){ if (x.n === q) sc += 20; if (x.n.startsWith(q)) sc += 4; if (x.n.split(" ").includes(w)) sc += 3; if (toks.includes(w)) sc += 2; if (x.k.startsWith(w)) sc += 1; } return sc - toks.length * 0.01; };
+      const res = emojiData.flatMap(g => g.list).filter(x => words.every(w => x.k.includes(w) || x.e === w)).map(x => [score(x), x]).sort((a, b) => b[0] - a[0]).slice(0, 300).map(p => p[1]);
+      grid.replaceChildren(res.length ? h("div",{class:"emo-sec"}, ...res.map(btn)) : h("div",{class:"note",style:"padding:12px",text:"Niciun emoji găsit."}));
+      tabs.classList.add("dim"); return;
+    }
+    tabs.classList.remove("dim");
+    const rec = recentList();
+    const secs = (rec.length ? [{ slug:"recent", name:"Folosite recent", ico:"🕘", list: rec }] : []).concat(emojiData);
+    grid.replaceChildren(...secs.map(g => h("div",{class:"emo-group","data-g":g.slug}, h("div",{class:"emo-h",text:g.name}), h("div",{class:"emo-sec"}, ...g.list.map(btn)))));
+    tabs.replaceChildren(...secs.map(g => h("button",{type:"button",class:"emo-tab",title:g.name,text:g.ico,onclick:() => { const el = grid.querySelector('[data-g="' + g.slug + '"]'); if (el) grid.scrollTop = el.offsetTop - grid.offsetTop; }})));
+  }
+  const setToneBtn = () => { toneBtn.textContent = toned("✋", TONES[tone]); };
+  toneBtn.onclick = () => { tone = (tone + 1) % TONES.length; try { localStorage.setItem("sebo:emojiTone", String(tone)); } catch(e){} setToneBtn(); render(); };
+  setToneBtn();
+  let t = null; input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(render, 120); });
+  input.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); const first = grid.querySelector(".emo"); if (first) first.click(); } });
+  render();
+}
+document.addEventListener("click", e => { if (emojiPop && !emojiPop.contains(e.target) && !e.target.closest(".emo-btn")) closeEmojiPicker(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeEmojiPicker(); });
 
 // ================= SETTINGS (stored on this device) =================
 const DEFAULT_SETTINGS = {
