@@ -7,6 +7,9 @@
 //   - low memory: one shared WebView2 browser for every window, and a "low memory" hint while hidden.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod sysaudio;
+
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
@@ -25,6 +28,7 @@ const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreen
 static PTT_VK: AtomicU32 = AtomicU32::new(0);
 static QUITTING: AtomicBool = AtomicBool::new(false);
 static LOW_MEM: AtomicBool = AtomicBool::new(false);
+static SYS_AUDIO_STOP: std::sync::Mutex<Option<std::sync::Arc<AtomicBool>>> = std::sync::Mutex::new(None);
 
 fn allowed_in_app(url: &tauri::Url) -> bool {
     matches!(url.host_str(), Some(h) if h == "complexuldev.github.io"
@@ -201,6 +205,31 @@ fn set_unread<R: Runtime>(app: AppHandle<R>, n: u32, flash: bool) {
     }
 }
 
+// ---------------- screen-share sound without FolkChat's own audio ----------------
+/// Starts capturing all PC sound except FolkChat (so friends don't hear themselves). PCM chunks
+/// (48 kHz stereo s16le) arrive on `on_data`. Errors if Windows is too old (needs 10 version 2004+).
+#[tauri::command]
+async fn sys_audio_start(on_data: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>) -> Result<(), String> {
+    sys_audio_stop();
+    #[cfg(windows)]
+    {
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        *SYS_AUDIO_STOP.lock().unwrap() = Some(stop.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            sysaudio::run(stop, tx, move |pcm| { let _ = on_data.send(tauri::ipc::InvokeResponseBody::Raw(pcm)); });
+        });
+        return rx.recv_timeout(Duration::from_secs(6)).map_err(|_| "timeout".to_string())?;
+    }
+    #[cfg(not(windows))]
+    { let _ = on_data; Err("windows only".into()) }
+}
+
+#[tauri::command]
+fn sys_audio_stop() {
+    if let Some(s) = SYS_AUDIO_STOP.lock().unwrap().take() { s.store(true, Ordering::SeqCst); }
+}
+
 #[tauri::command]
 fn app_version<R: Runtime>(app: AppHandle<R>) -> String { app.package_info().version.to_string() }
 
@@ -210,7 +239,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![procs, foreground, ptt_watch, overlay_open, overlay_close, overlay_interactive, overlay_fit, set_unread, app_version])
+        .invoke_handler(tauri::generate_handler![procs, foreground, ptt_watch, overlay_open, overlay_close, overlay_interactive, overlay_fit, set_unread, app_version, sys_audio_start, sys_audio_stop])
         .setup(move |app| {
             let handle = app.handle().clone();
             let opener = app.handle().clone();
