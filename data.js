@@ -72,6 +72,20 @@ export async function createKey(label){
   await setDoc(doc(db, "keys", await sha256(k)), { claimedBy: null, admin: false, label: label || "Extra key", created: serverTimestamp() });
   return k;
 }
+// Make many keys in one go (no limit on the total). Returns [{key,label}].
+export async function createKeys(n, label){
+  const out = [];
+  for (let start = 0; start < n; start += 400){
+    const b = writeBatch(db);
+    for (let i = start; i < Math.min(n, start + 400); i++){
+      const k = newKey(), l = (label || "Cheie") + (n > 1 ? " " + (i + 1) : "");
+      b.set(doc(db, "keys", await sha256(k)), { claimedBy: null, admin: false, label: l.slice(0, 40), created: serverTimestamp() });
+      out.push({ key: k, label: l.slice(0, 40) });
+    }
+    await b.commit();
+  }
+  return out;
+}
 export async function freeKey(hash, memberId){
   const b = writeBatch(db);
   b.delete(doc(db, "members", memberId));
@@ -85,18 +99,20 @@ export function watchMembers(cb, err){ return onSnapshot(collection(db, "members
 export function saveProfile(p){
   return updateDoc(doc(db, "members", uid), {
     avatar: p.avatar || "", pronouns: p.pronouns || "",
-    tag: p.tag, emoji: p.emoji, platform: p.platform, bio: p.bio, color: p.color, banner: p.banner,
-    mode: p.mode, drop: p.drop, main: p.main, status: p.status, lfg: !!p.lfg
+    tag: p.tag, emoji: p.emoji, bio: p.bio, color: p.color, banner: p.banner, status: p.status,
+    platform: deleteField(), mode: deleteField(), drop: deleteField(), main: deleteField(), lfg: deleteField()
   });
 }
 
 // ---------- chat (rate-limited: each write also stamps limits/{uid}) ----------
 export function watchChat(cb, err){ return onSnapshot(query(collection(db, "chat"), orderBy("ts", "desc"), limit(200)), s => cb(rows(s), s.metadata.fromCache), err); }
 // Attachments: att = { img:{data,w,h} } (stored in images/{id}) or { gif:{url,w,h} }.
-function addAtt(b, body, att, kind){
+function addAtt(b, body, att, kind, pair){
   if (att && att.img){
     const ref = doc(collection(db, "images"));
-    b.set(ref, { uid, kind, data: att.img.data, w: att.img.w|0, h: att.img.h|0, ts: serverTimestamp() });
+    const img = { uid, kind, data: att.img.data, w: att.img.w|0, h: att.img.h|0, ts: serverTimestamp() };
+    if (pair) img.pair = pair;
+    b.set(ref, img);
     body.img = ref.id;
   }
   if (att && att.gif) body.gif = { url: att.gif.url, w: att.gif.w|0, h: att.gif.h|0 };
@@ -135,24 +151,35 @@ export async function createChannel(c){
 }
 export function updateChannel(id, f){ return updateDoc(doc(db, "channels", id), f); }
 export function deleteChannel(id){ return deleteDoc(doc(db, "channels", id)); }
+// A conversation id is either a channel id or "dm:<uidA>_<uidB>" (sorted) for a private DM.
+export const dmId = other => "dm:" + [uid, other].sort().join("_");
+const isDm = cid => String(cid).startsWith("dm:");
+const msgsCol = cid => isDm(cid) ? collection(db, "dms", cid.slice(3), "msgs") : collection(db, "channels", cid, "msgs");
+const msgDoc = (cid, id) => doc(msgsCol(cid), id);
 export function watchMsgs(cid, n, cb, err){
-  return onSnapshot(query(collection(db, "channels", cid, "msgs"), orderBy("ts", "desc"), limit(n)), s => cb(rows(s), s.metadata.fromCache), err);
+  return onSnapshot(query(msgsCol(cid), orderBy("ts", "desc"), limit(n)), s => cb(rows(s), s.metadata.fromCache), err);
 }
 export async function sendMsg(cid, text, att, extra){
-  const b = writeBatch(db);
-  const body = addAtt(b, Object.assign({ uid, text, ts: serverTimestamp() }, extra || {}), att, "chat");
-  b.set(doc(collection(db, "channels", cid, "msgs")), body);
+  const b = writeBatch(db), pair = isDm(cid) ? cid.slice(3) : null;
+  const body = addAtt(b, Object.assign({ uid, text, ts: serverTimestamp() }, extra || {}), att, pair ? "dm" : "chat", pair);
+  b.set(doc(msgsCol(cid)), body);
+  if (pair) b.set(doc(db, "dms", pair), { users: pair.split("_"), last: serverTimestamp(), lastUid: uid });
   b.set(limitsRef(), { t: serverTimestamp() });
   await b.commit();
 }
-export function editMsg(cid, id, text){ return updateDoc(doc(db, "channels", cid, "msgs", id), { text, edited: serverTimestamp() }); }
+export function editMsg(cid, id, text){ return updateDoc(msgDoc(cid, id), { text, edited: serverTimestamp() }); }
 export async function deleteMsg(cid, id, img){
   const b = writeBatch(db);
-  b.delete(doc(db, "channels", cid, "msgs", id));
+  b.delete(msgDoc(cid, id));
   if (img) b.delete(doc(db, "images", img));
   await b.commit();
 }
-export function reactMsg(cid, id, key, on){ return updateDoc(doc(db, "channels", cid, "msgs", id), { ["rx." + key + "_" + uid]: on ? true : deleteField() }); }
+export function reactMsg(cid, id, key, on){ return updateDoc(msgDoc(cid, id), { ["rx." + key + "_" + uid]: on ? true : deleteField() }); }
+// My DM conversations (only ones I'm in; the rules block everything else).
+export function watchDms(cb){
+  return onSnapshot(query(collection(db, "dms"), where("users", "array-contains", uid)),
+    s => cb(s.docs.map(d => { const x = d.data(SNAP); return { id: "dm:" + d.id, other: (x.users || []).find(u => u !== uid) || uid, last: ms(x.last) }; })), () => {});
+}
 export async function pruneChannels(ids, days){
   const cut = new Date(Date.now() - days * 86400000);
   for (const cid of ids){
@@ -188,16 +215,6 @@ export async function deleteReply(postId, id){
   const b = writeBatch(db);
   b.delete(doc(db, "posts", postId, "replies", id));
   b.update(doc(db, "posts", postId), { replyCount: increment(-1) });
-  await b.commit();
-}
-
-// ---------- stats ----------
-export function watchDayStats(day, cb){ return onSnapshot(collection(db, "days", day, "stats"), s => { const o = {}; s.docs.forEach(d => o[d.id] = d.data()); cb(o); }, () => {}); }
-export function watchTotals(cb){ return onSnapshot(collection(db, "totals"), s => { const o = {}; s.docs.forEach(d => o[d.id] = d.data()); cb(o); }, () => {}); }
-export async function saveStats(day, cur, tot){
-  const b = writeBatch(db);
-  b.set(doc(db, "days", day, "stats", uid), cur);
-  b.set(doc(db, "totals", uid), tot);
   await b.commit();
 }
 
