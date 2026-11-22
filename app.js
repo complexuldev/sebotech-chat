@@ -1,5 +1,5 @@
 // FolkChat – app UI. All user text is rendered with textContent (no HTML injection).
-import * as D from "./data.js?v=13";
+import * as D from "./data.js?v=14";
 import { OWNER_EMAIL, KLIPY_KEY, MEDIA_URL, VAPID_KEY } from "./config.js?v=11";
 
 const EMOJIS = ["😎","🐱","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
@@ -587,6 +587,14 @@ async function prepImage(file){
 }
 // Turn a picked picture into what gets stored: a worker URL (R2) or, without a worker, a data URL in Firestore.
 async function finalizeAtt(att, kind){
+  if (att && att.vm && att.vm.blob){
+    const v = att.vm;
+    if (D.mediaOn()){ const { url } = await D.uploadMedia(v.blob, kind); return { vm: { url, dur: v.dur, wave: v.wave } }; }
+    const data = await blobToDataURL(v.blob);
+    if (data.length > 900000) throw new Error("Mesajul vocal e prea lung.");
+    return { vm: { data, dur: v.dur, wave: v.wave } };
+  }
+  if (att && att.vidFile){ const v = att.vidFile; const { url } = await D.uploadMedia(v.blob, kind); return { vid: { url, w: v.w, h: v.h, dur: v.dur } }; }
   if (!att || !att.img) return att;
   const im = att.img;
   if (D.mediaOn()){
@@ -604,23 +612,181 @@ function attachBox(kind){
   const prev = $(kind + "Prev");
   function show(){
     if (!st.att){ prev.classList.add("hidden"); prev.replaceChildren(); return; }
+    if (st.att.vm){ prev.classList.add("hidden"); return; }
+    if (st.att.vidFile){
+      const v = st.att.vidFile;
+      prev.replaceChildren(h("video",{src:v.preview,muted:"",preload:"metadata",class:"prev-vid"}), h("span",{class:"note",text:"🎬 Video · " + fmtDur(v.dur) + " · " + (v.size / 1048576).toFixed(1) + " MB"}),
+        h("button",{type:"button",class:"icon",title:"Elimină","aria-label":"Elimină atașamentul",text:"✕",onclick:()=>{ st.att = null; show(); }}));
+      prev.classList.remove("hidden"); return;
+    }
     const src = st.att.img ? st.att.img.preview : st.att.gif.thumb || st.att.gif.url;
     prev.replaceChildren(h("img",{src,alt:"",decoding:"async"}), h("span",{class:"note",text: st.att.img ? "Imagine atașată" : "GIF"}),
       h("button",{type:"button",class:"icon",title:"Elimină","aria-label":"Elimină atașamentul",text:"✕",onclick:()=>{ st.att = null; show(); }}));
     prev.classList.remove("hidden");
   }
   async function useFile(file){
-    try { st.att = { img: await prepImage(file) }; show(); }
-    catch(e){ flash(e.message || "Imaginea nu a putut fi încărcată.", true); }
+    try {
+      if (file && file.type.startsWith("video/") && kind === "chat") st.att = { vidFile: await prepVideo(file) };
+      else st.att = { img: await prepImage(file) };
+      show();
+    }
+    catch(e){ flash(e.message || "Fișierul nu a putut fi încărcat.", true); }
   }
-  const input = h("input",{type:"file",accept:"image/png,image/jpeg,image/webp,image/gif",class:"hidden"});
+  const input = h("input",{type:"file",accept:"image/png,image/jpeg,image/webp,image/gif" + (kind === "chat" ? ",video/mp4,video/webm,video/quicktime" : ""),class:"hidden"});
   input.addEventListener("change", () => { if (input.files[0]) useFile(input.files[0]); input.value = ""; });
   document.body.append(input);
   $(kind + "Attach").onclick = () => input.click();
   $(kind + "Gif").onclick = ev => openGifPicker(ev.currentTarget, g => { st.att = { gif: g }; show(); });
-  return { get: () => st.att, clear: () => { st.att = null; show(); }, useFile };
+  return { get: () => st.att, set: a => { st.att = a; show(); }, clear: () => { st.att = null; show(); }, useFile };
 }
+// ---------- voice messages + videos ----------
+const VM_MAX_S = 180, VIDEO_MAX = 50 * 1024 * 1024;
+const fmtDur = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+const WAVE_CH = "0123456789abcdefghijklmnopqrstuv";            // 32 levels, one character per bar
+const waveEnc = peaks => { const mx = Math.max(0.02, ...peaks); return peaks.map(p => WAVE_CH[Math.min(31, Math.round(p / mx * 31))]).join(""); };
+const waveDec = s => [...String(s || "")].map(c => Math.max(0, WAVE_CH.indexOf(c)) / 31);
+function bars48(levels){
+  const n = 48, out = [];
+  if (!levels.length) return new Array(n).fill(0.05);
+  for (let i = 0; i < n; i++){
+    const a = Math.floor(i * levels.length / n), b = Math.max(a + 1, Math.floor((i + 1) * levels.length / n));
+    let m = 0; for (let j = a; j < b && j < levels.length; j++) m = Math.max(m, levels[j]);
+    out.push(m);
+  }
+  return out;
+}
+let rec = null;   // { mr, stream, chunks, levels, t0, timer, bar, cancelled }
+function vmMime(){
+  for (const t of ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]) if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t;
+  return "";
+}
+async function startVoiceMsg(){
+  if (rec) return;
+  if (!curCh){ flash("Alege întâi o conversație.", true); return; }
+  if (!window.MediaRecorder){ flash("Acest dispozitiv nu poate înregistra mesaje vocale.", true); return; }
+  if (voice.room || call.pair){ flash("Ești în apel: închide-l ca să înregistrezi un mesaj vocal.", true); return; }
+  let stream; try { stream = await getMic(); } catch(e){ micAlert(e); return; }
+  const mime = vmMime();
+  let mr; try { mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 24000 } : { audioBitsPerSecond: 24000 }); }
+  catch(e){ stream.getTracks().forEach(t => t.stop()); flash("Nu pot porni înregistrarea.", true); return; }
+  const r = { mr, stream, chunks: [], levels: [], t0: Date.now(), cancelled: false, cid: curCh };
+  rec = r;
+  mr.ondataavailable = e => { if (e.data && e.data.size) r.chunks.push(e.data); };
+  mr.onstop = () => finishVoiceMsg(r);
+  mr.start(250);
+  // live level for the waveform
+  try {
+    const ctx = meterCtx(), an = ctx.createAnalyser(); an.fftSize = 512; ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Uint8Array(512);
+    r.lvl = setInterval(() => { an.getByteTimeDomainData(buf); let s = 0; for (const v of buf){ const x = (v - 128) / 128; s += x * x; } r.levels.push(Math.min(1, Math.sqrt(s / buf.length) * 4)); drawRec(); }, 100);
+  } catch(e){}
+  r.timer = setInterval(() => { if ((Date.now() - r.t0) / 1000 >= VM_MAX_S) stopVoiceMsg(true); else drawRec(); }, 250);
+  const wrap = $("composerWrap");
+  r.bar = h("div",{class:"rec-bar"});
+  wrap.append(r.bar); wrap.classList.add("recording");
+  drawRec();
+}
+function drawRec(){
+  const r = rec; if (!r || !r.bar) return;
+  const secs = (Date.now() - r.t0) / 1000, lv = r.levels.slice(-40);
+  r.bar.replaceChildren(
+    h("button",{type:"button",class:"icon rec-x",title:"Anulează","aria-label":"Anulează mesajul vocal",text:"🗑",onclick:() => stopVoiceMsg(false)}),
+    h("span",{class:"rec-dot"}),
+    h("b",{class:"rec-t",text:fmtDur(secs) + (secs > VM_MAX_S - 15 ? " / " + fmtDur(VM_MAX_S) : "")}),
+    h("div",{class:"rec-wave"}, lv.map(v => h("i",{style:"height:" + Math.max(8, Math.round(v * 100)) + "%"}))),
+    h("button",{type:"button",class:"primary rec-send",title:"Trimite mesajul vocal","aria-label":"Trimite mesajul vocal",text:"➤",onclick:() => stopVoiceMsg(true)}));
+}
+function stopVoiceMsg(send){
+  const r = rec; if (!r) return;
+  rec = null; r.cancelled = !send; r.dur = (Date.now() - r.t0) / 1000;
+  clearInterval(r.timer); clearInterval(r.lvl);
+  try { r.mr.stop(); } catch(e){ finishVoiceMsg(r); }
+  r.stream.getTracks().forEach(t => t.stop());
+  if (r.bar) r.bar.remove(); $("composerWrap").classList.remove("recording");
+}
+async function finishVoiceMsg(r){
+  if (r.done) return; r.done = true;
+  if (r.cancelled) return;
+  if (r.dur < 0.7){ flash("Mesaj vocal prea scurt: ține apăsat puțin mai mult.", true); return; }
+  const blob = new Blob(r.chunks, { type: (r.mr.mimeType || r.chunks[0] && r.chunks[0].type || "audio/webm") });
+  const wave = waveEnc(bars48(r.levels));
+  if (curCh !== r.cid){ flash("Ai schimbat conversația: mesajul vocal nu a fost trimis.", true); return; }
+  chatAtt.set({ vm: { blob, dur: Math.min(VM_MAX_S, r.dur), wave } });
+  $("chatForm").requestSubmit();
+}
+// player used in messages
+function vmPlayer(m){
+  const vm = m.vm, peaks = waveDec(vm.wave).length ? waveDec(vm.wave) : new Array(48).fill(0.3);
+  const audio = new Audio(); audio.preload = "none";
+  let loaded = false, speed = 1;
+  const bars = peaks.map(p => h("i",{style:"height:" + Math.max(10, Math.round(p * 100)) + "%"}));
+  const wave = h("div",{class:"vm-wave"}, bars);
+  const time = h("span",{class:"vm-t",text:fmtDur(vm.dur)});
+  const btn = h("button",{type:"button",class:"vm-play","aria-label":"Redă mesajul vocal",text:"▶"});
+  const spd = h("button",{type:"button",class:"vm-spd",title:"Viteză",text:"1×"});
+  const paint = () => {
+    const f = audio.duration && isFinite(audio.duration) ? audio.currentTime / audio.duration : audio.currentTime / (vm.dur || 1);
+    const k = Math.round(Math.min(1, f) * bars.length);
+    bars.forEach((b, i) => b.classList.toggle("on", i < k));
+    time.textContent = audio.paused && !audio.currentTime ? fmtDur(vm.dur) : fmtDur(audio.currentTime);
+  };
+  const load = async () => {
+    if (loaded) return true;
+    let src = null;
+    if (vm.url && mediaUrlOk(vm.url)) src = vm.url;
+    else if (vm.id){ const d = await D.getImage(vm.id); if (d) src = dataUrlToBlobUrl(d); }
+    if (!src){ wave.replaceWith(h("span",{class:"note",text:"(mesaj vocal șters)"})); return false; }
+    audio.src = src; loaded = true; return true;
+  };
+  btn.onclick = async () => {
+    if (!audio.paused){ audio.pause(); return; }
+    btn.textContent = "…";
+    if (!(await load())){ btn.textContent = "▶"; return; }
+    if (settings.voice.spkId && audio.setSinkId) audio.setSinkId(settings.voice.spkId).catch(() => {});
+    audio.playbackRate = speed;
+    audio.play().catch(() => { btn.textContent = "▶"; });
+  };
+  spd.onclick = () => { speed = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1; audio.playbackRate = speed; spd.textContent = speed + "×"; };
+  wave.onclick = async e => {
+    if (!(await load())) return;
+    const r = wave.getBoundingClientRect(), f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const go = () => { audio.currentTime = f * (isFinite(audio.duration) && audio.duration ? audio.duration : vm.dur); paint(); };
+    if (audio.readyState >= 1) go(); else audio.addEventListener("loadedmetadata", go, { once: true });
+    if (audio.paused) btn.click();
+  };
+  audio.onplay = () => { btn.textContent = "⏸"; if (vmNow && vmNow !== audio) vmNow.pause(); vmNow = audio; };
+  audio.onpause = () => { btn.textContent = "▶"; };
+  audio.onended = () => { btn.textContent = "▶"; audio.currentTime = 0; paint(); };
+  audio.ontimeupdate = paint;
+  return h("div",{class:"vm"}, btn, wave, time, spd);
+}
+let vmNow = null;
+// the page's security policy only plays media from blob: URLs, so turn the stored data: URL into one
+function dataUrlToBlobUrl(d){
+  const i = d.indexOf(","), head = d.slice(5, i), mime = head.replace(/;base64$/, "");
+  const bin = atob(d.slice(i + 1)), u = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
+  return URL.createObjectURL(new Blob([u], { type: mime }));
+}
+function vidPlayer(m){
+  const v = h("video",{class:"att vid",controls:"",preload:"metadata",playsinline:"",src:m.vid.url});
+  if (m.vid.w && m.vid.h) v.style.aspectRatio = m.vid.w + "/" + m.vid.h;
+  v.onerror = () => v.replaceWith(h("div",{class:"note",text:"(video șters)"}));
+  return v;
+}
+async function prepVideo(file){
+  if (!D.mediaOn()) throw new Error("Videoclipurile au nevoie de spațiul gratuit Cloudflare (nu de Firebase), care nu e pornit încă. Cere-i adminului să-l activeze.");
+  if (!/^video\/(mp4|webm|quicktime)$/.test(file.type)) throw new Error("Doar video MP4, WEBM sau MOV.");
+  if (file.size > VIDEO_MAX) throw new Error("Video prea mare (max 50 MB). Taie-l sau trimite unul mai scurt.");
+  const preview = URL.createObjectURL(file);
+  const meta = await new Promise(res => { const v = document.createElement("video"); v.preload = "metadata"; v.muted = true; v.onloadedmetadata = () => res({ w: v.videoWidth, h: v.videoHeight, dur: v.duration }); v.onerror = () => res({ w: 0, h: 0, dur: 0 }); v.src = preview; });
+  return { blob: file, w: meta.w | 0, h: meta.h | 0, dur: isFinite(meta.dur) ? meta.dur : 0, preview, size: file.size };
+}
+const attLabel = m => m.vm ? "🎤 Mesaj vocal (" + fmtDur(m.vm.dur || 0) + ")" : m.vid ? "🎬 Video" : m.gif ? "🎞️ GIF" : (m.img || m.pic) ? "🖼️ Imagine" : "…";
+const hasAtt = m => !!(m.img || m.gif || m.pic || m.vm || m.vid);
 function attEl(m){
+  if (m.vm) return vmPlayer(m);
+  if (m.vid && mediaUrlOk(m.vid.url)) return vidPlayer(m);
   if (m.pic && mediaUrlOk(m.pic.url)){
     const el = h("img",{class:"att",alt:"imagine",loading:"lazy",decoding:"async",src:m.pic.url});
     if (m.pic.w && m.pic.h) el.style.aspectRatio = m.pic.w + "/" + m.pic.h;
@@ -878,7 +1044,7 @@ function msgPreview(m){
     const t = m.text.replace(/\|\|[^|]+\|\|/g, "▒▒▒").replace(/[*_~`]{1,3}/g, "").replace(/\s+/g, " ").trim();
     if (t) return t.slice(0, 160);
   }
-  return m.gif ? "🎞️ GIF" : (m.img || m.pic) ? "🖼️ Imagine" : "…";
+  return attLabel(m);
 }
 function popMsg(m, cid, important){
   if (!settings.popups || document.hidden) return;   // in the background the system notification takes over
@@ -919,7 +1085,7 @@ function notifyDesktop(m, cid, mention){
   if (!settings.notify || !("Notification" in window) || Notification.permission !== "granted" || !document.hidden) return;
   const p = P(m.uid) || {};
   try {
-    const n = new Notification(isDmId(cid) ? "💬 " + (p.tag || "Cineva") + " (mesaj privat)" : (mention ? "@ " : "") + (p.tag || "Cineva") + " · " + convName(cid), { body: m.text ? m.text.slice(0, 140) : (m.img ? "🖼️ imagine" : "🎞️ GIF"), tag: "sebo-" + cid, silent: true });
+    const n = new Notification(isDmId(cid) ? "💬 " + (p.tag || "Cineva") + " (mesaj privat)" : (mention ? "@ " : "") + (p.tag || "Cineva") + " · " + convName(cid), { body: m.text ? m.text.slice(0, 140) : attLabel(m), tag: "sebo-" + cid, silent: true });
     n.onclick = () => { window.focus(); location.hash = "#chat"; selectChannel(cid); n.close(); };
   } catch(e){}
 }
@@ -955,7 +1121,7 @@ function renderChannels(){
   $("dmList").replaceChildren(...list.map(c => {
     const u = unreadInfo(c.id), muted = !!settings.muted[c.id], p = P(c.other);
     const lastMsg = (chMsgs[c.id] || []).slice(-1)[0];
-    const prev = lastMsg ? (lastMsg.uid === uid ? "Tu: " : "") + (lastMsg.text || (lastMsg.img ? "🖼️ imagine" : "🎞️ GIF")) : "Conversație nouă";
+    const prev = lastMsg ? (lastMsg.uid === uid ? "Tu: " : "") + (lastMsg.text || attLabel(lastMsg)) : "Conversație nouă";
     return h("div",{class:"ch dm" + (c.id === curCh ? " on" : "") + (u.unread && !muted ? " unread" : "") + (muted ? " muted" : ""), onclick:() => selectChannel(c.id)},
       avatar(c.other,"sm"),
       h("div",{class:"grow",style:"min-width:0"}, h("div",{class:"ch-name",text:p.tag}), h("div",{class:"dm-prev",text:prev})),
@@ -1118,7 +1284,7 @@ function msgEl(m, grouped){
     h("button",{type:"button",title:"Reacționează","aria-label":"Reacționează",text:"😀",onclick:ev => rxPicker(ev.currentTarget, m)}),
     h("button",{type:"button",title:"Răspunde","aria-label":"Răspunde",text:"↩",onclick:() => startReply(m)}),
     mine ? h("button",{type:"button",title:"Editează","aria-label":"Editează",text:"✎",onclick:() => startEdit(m)}) : null,
-    canDel ? h("button",{type:"button",title:"Șterge","aria-label":"Șterge",class:"danger",text:"🗑",onclick:ev => { const b = ev.currentTarget; if (b.dataset.sure !== "1"){ b.dataset.sure = "1"; b.textContent = "Sigur?"; setTimeout(() => { b.dataset.sure = ""; b.textContent = "🗑"; }, 3000); return; } D.deleteMsg(curCh, m.id, m.img, m.pic && m.pic.url).catch(writeErr); }}) : null);
+    canDel ? h("button",{type:"button",title:"Șterge","aria-label":"Șterge",class:"danger",text:"🗑",onclick:ev => { const b = ev.currentTarget; if (b.dataset.sure !== "1"){ b.dataset.sure = "1"; b.textContent = "Sigur?"; setTimeout(() => { b.dataset.sure = ""; b.textContent = "🗑"; }, 3000); return; } D.deleteMsg(curCh, m.id, m.img || (m.vm && m.vm.id), (m.pic && m.pic.url) || (m.vm && m.vm.url) || (m.vid && m.vid.url)).catch(writeErr); }}) : null);
   const body = h("div",{class:"grow mbody"});
   if (m.reply && typeof m.reply === "object"){
     const rp = P(m.reply.uid);
@@ -1129,7 +1295,7 @@ function msgEl(m, grouped){
   if (editing === m.id){
     const ta = h("textarea",{class:"editbox",maxlength:"2000"}); ta.value = m.text || "";
     ta.addEventListener("keydown", e => {
-      if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); const t = ta.value.trim(); if (!t && !m.img && !m.gif && !m.pic) return; D.editMsg(curCh, m.id, t.slice(0,2000)).then(() => { editing = null; renderMsgs(false); }).catch(writeErr); }
+      if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); const t = ta.value.trim(); if (!t && !hasAtt(m)) return; D.editMsg(curCh, m.id, t.slice(0,2000)).then(() => { editing = null; renderMsgs(false); }).catch(writeErr); }
       if (e.key === "Escape"){ editing = null; renderMsgs(false); }
     });
     body.append(ta, h("div",{class:"note",style:"font-size:12px",text:"Enter = salvează · Esc = anulează"}));
@@ -1137,7 +1303,7 @@ function msgEl(m, grouped){
   } else if (m.text){
     body.append(h("div",{class:"txt"}, richText(m.text), m.edited ? h("span",{class:"edited",text:" (editat)"}) : null));
   }
-  if (m.img || m.gif || m.pic) body.append(h("div",{class:"attwrap"}, attEl(m)));
+  if (hasAtt(m)) body.append(h("div",{class:"attwrap"}, attEl(m)));
   const rx = m.rx || {}, counts = {};
   for (const k in rx) if (rx[k]){ const [key, who] = [k.slice(0, k.indexOf("_")), k.slice(k.indexOf("_") + 1)]; (counts[key] = counts[key] || []).push(who); }
   const chips = MSG_RX.filter(([k]) => counts[k]).map(([k,e]) => h("button",{type:"button",class:"rx" + (counts[k].includes(uid) ? " on" : ""),title:counts[k].map(id => (P(id)||{}).tag || "?").join(", "),onclick:() => toggleRx(m, k)}, e + " " + counts[k].length));
@@ -1223,6 +1389,7 @@ let typingNow = false, typingOff = null;
 function bindChat(){
   const ci = $("chatIn");
   chatAtt = attachBox("chat");
+  $("chatVoice").onclick = () => rec ? stopVoiceMsg(true) : startVoiceMsg();
   $("chAdd").onclick = () => channelModal(null);
   $("dmAdd").onclick = dmPicker;
   $("voiceAdd").onclick = () => voiceRoomModal(null);
@@ -1262,10 +1429,11 @@ function bindChat(){
     ci.value = ""; ci.style.height = "auto"; closeMentionPop();
     const cid = curCh;
     try {
-      if (att && att.img) $("chatBtn").textContent = "Se încarcă…";
+      if (att && (att.img || att.vidFile)) $("chatBtn").textContent = "Se încarcă…";
+      if (att && att.vidFile) flash("🎬 Se încarcă videoclipul…");
       await D.sendMsg(cid, text.slice(0,2000), await finalizeAtt(att, isDmId(cid) ? "dm" : "chat"), extra);
       chatAtt.clear(); replyTo = null; renderReplyBar(); playSfx("send"); scrollChat(true);
-      const preview = text ? text.slice(0, 100) : "📎 atașament";
+      const preview = text ? text.slice(0, 100) : att && att.vm ? "🎤 Mesaj vocal" : att && att.vidFile ? "🎬 Video" : "📎 atașament";
       if (isDmId(cid)) D.pushNotify({ type: "dm", cid: cid.slice(3), text: preview });
       else if (mentions.length || everyone) D.pushNotify({ type: "mention", ch: cid, to: everyone ? ["*"] : mentions.slice(0, 25), text: preview });
     }
