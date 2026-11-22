@@ -13,4 +13,4 @@ export const FIREBASE_CONFIG = {
 export const OWNER_EMAIL = "ghiurcutadragosgamer@gmail.com";
 
 // Free GIF search key from partner.klipy.com (leave empty to disable GIF search).
-export const KLIPY_KEY = "";
+export const KLIPY_KEY = "7Cej8PO1ROTI5DDxeO4BC4CM0nbtCoyTN0TVL9Wocj4TKyPN7XPzdRP9loTQFz0E";
