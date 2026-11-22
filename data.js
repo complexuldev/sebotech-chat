@@ -140,6 +140,18 @@ function addAtt(b, body, att, kind, pair){
     body.img = ref.id;
   }
   if (att && att.pic) body.pic = { url: att.pic.url, w: att.pic.w|0, h: att.pic.h|0 };
+  if (att && att.vm){   // voice message
+    const vm = { dur: Math.max(0.1, Math.round(att.vm.dur * 10) / 10), wave: String(att.vm.wave || "").slice(0, 80) };
+    if (att.vm.url) vm.url = att.vm.url;
+    else {
+      const ref = doc(collection(db, "images"));
+      const a = { uid, kind, data: att.vm.data, w: 0, h: Math.round(att.vm.dur), ts: serverTimestamp() };
+      if (pair) a.pair = pair;
+      b.set(ref, a); vm.id = ref.id;
+    }
+    body.vm = vm;
+  }
+  if (att && att.vid) body.vid = { url: att.vid.url, w: att.vid.w|0, h: att.vid.h|0, dur: Math.round((att.vid.dur || 0) * 10) / 10 };
   if (att && att.gif) body.gif = { url: att.gif.url, w: att.gif.w|0, h: att.gif.h|0 };
   return body;
 }
