@@ -412,6 +412,34 @@
   body.compact .dc .msg .gutter{width:24px}
   body.compact .dc .msg .who b{font-size:14px}
   body.no-avatars .dc .msg > .av, body.no-avatars .dc .msg .gutter{display:none}
+  /* ---- motion: short, GPU-only (opacity/transform), nothing runs while idle ---- */
+  :root{--ease:cubic-bezier(.2,.8,.2,1);--spring:cubic-bezier(.34,1.4,.64,1)}
+  @keyframes fc-fade{from{opacity:0}to{opacity:1}}
+  @keyframes fc-up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @keyframes fc-down{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+  @keyframes fc-pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+  @keyframes fc-jumbo{0%{opacity:0;transform:scale(.4)}60%{opacity:1;transform:scale(1.12)}100%{transform:none}}
+  .dc .msg.msg-in{animation:fc-up .22s var(--ease) both}
+  .dc .msg.msg-in .txt.jumbo{display:inline-block;transform-origin:left bottom;animation:fc-jumbo .38s var(--spring) both}
+  .view:not(.hidden){animation:fc-fade .16s ease-out}
+  .overlay:not(.hidden){animation:fc-fade .14s ease-out}
+  .overlay:not(.hidden) > .modal{animation:fc-pop .2s var(--spring)}
+  .banner:not(.hidden){animation:fc-down .2s var(--ease)}
+  .emo-pop,.gif-pop,.mention-pop{animation:fc-pop .15s var(--ease);transform-origin:bottom right}
+  .callbar{animation:fc-down .22s var(--ease)}
+  #stage{animation:fc-pop .2s var(--ease)}
+  .rx{transition:transform .12s var(--spring),background .12s,border-color .12s}
+  .rx:hover{transform:translateY(-1px)}
+  .rx:active{transform:scale(.9)}
+  button,.btn,.ch,.tab,.tabs a{transition:background .12s,border-color .12s,color .12s,transform .1s var(--ease),opacity .12s}
+  button:active:not(:disabled),.ch:active,.tabs a:active{transform:scale(.96)}
+  .send-btn:active,#chatBtn:active{transform:scale(.92)}
+  .av{transition:box-shadow .12s,transform .15s var(--spring)}
+  .msg:hover > .av{transform:scale(1.04)}
+  .dc-side{transition:transform .24s var(--ease)}
+  .pop{animation:fc-pop .2s var(--spring)}
+  .ch.unread::before,.badge,.tab-badge,#chatBadge:not(.hidden){animation:fc-pop .25s var(--spring)}
+  @media (prefers-reduced-motion: reduce){ *{animation:none !important;transition:none !important} }
   body.reduce-motion *{transition:none !important;animation:none !important}
   /* modals: settings / channel */
   .modal.small{max-width:440px}
@@ -862,6 +890,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=33"></script>
+<script type="module" src="app.js?v=34"></script>
 </body>
 </html>
