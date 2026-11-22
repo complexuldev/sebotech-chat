@@ -418,6 +418,21 @@
   body.light .top{background:rgba(243,243,246,.9)}
   body.light button.primary{background:#16161a;color:#fff;border-color:#16161a}
   body.light .modal .close{background:rgba(0,0,0,.08);color:var(--text)}
+  /* DMs */
+  .side-scroll{flex:1;overflow-y:auto;min-height:0}
+  .side-scroll .ch-list{flex:none;overflow:visible}
+  .side-h{display:flex;align-items:center;margin:14px 8px 4px 12px;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .side-h .icon{width:24px;height:24px;font-size:15px}
+  .ch.dm{gap:9px;padding:6px 8px}
+  .ch.dm .ch-name{font-weight:600}
+  .dm-prev{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ch.dm.unread .dm-prev{color:var(--text)}
+  .mem .mem-dm{margin-left:auto;width:28px;height:28px;font-size:14px;opacity:0;transition:opacity .12s}
+  .mem:hover .mem-dm{opacity:1}
+  @media (hover:none){.mem .mem-dm{opacity:1}}
+  .dm-pick{max-height:340px;overflow-y:auto;margin-top:10px}
+  .dc-head .av.sm{width:28px;height:28px;font-size:15px}
+  .msgs .empty h3{margin:8px 0 4px}
   /* mobile */
   @media (max-width:900px){
     .dc{grid-template-columns:1fr;height:calc(100vh - 150px)}
@@ -454,7 +469,7 @@
   <div class="card">
     <div class="h2">Configurare inițială</div>
     <div id="setupBody">
-      <p class="note" style="margin-top:0">Tu ești proprietarul. Aici se creează cele 5 chei de acces. Cheia 1 e a ta și îți dă puteri de admin.</p>
+      <p class="note" style="margin-top:0">Tu ești proprietarul. Aici se creează primele 5 chei de acces (poți genera oricâte mai târziu din Profil). Cheia 1 e a ta și îți dă puteri de admin.</p>
       <button class="primary" type="button" id="setupBtn" style="width:100%">Creează cele 5 chei</button>
     </div>
     <div class="err" id="setupErr"></div>
@@ -468,10 +483,8 @@
     <form id="gateForm" autocomplete="off">
       <label for="keyIn" style="margin-top:0">Cheie de acces</label>
       <input id="keyIn" placeholder="SEBO-XXXX-XXXX-XXXX" spellcheck="false" style="text-transform:uppercase;letter-spacing:1px">
-      <label for="tagIn">Gamertag</label>
-      <input id="tagIn" maxlength="24" placeholder="Cum îți zice echipa">
-      <label for="platIn">Platformă</label>
-      <select id="platIn"></select>
+      <label for="tagIn">Nume</label>
+      <input id="tagIn" maxlength="24" placeholder="Cum să-ți zică ceilalți">
       <label>Iconiță</label>
       <div class="emojis" id="gateEmoji"></div>
       <div style="margin-top:18px"><button class="primary" type="submit" id="gateBtn" style="width:100%">Intră</button></div>
@@ -487,8 +500,7 @@
     <nav class="tabs" id="tabs">
       <a href="#chat" data-v="chat"><span class="ico">💬</span><span>Chat</span><span class="badge hidden" id="chatBadge"></span></a>
       <a href="#feed" data-v="feed"><span class="ico">📰</span><span>Postări</span></a>
-      <a href="#squad" data-v="squad"><span class="ico">👥</span><span>Echipa</span></a>
-      <a href="#stats" data-v="stats"><span class="ico">📊</span><span>Statistici</span></a>
+      <a href="#squad" data-v="squad"><span class="ico">👥</span><span>Membri</span></a>
       <a href="#me" data-v="me"><span class="ico">⚙️</span><span>Profil</span></a>
     </nav>
     <button type="button" class="icon" id="topSettings" title="Setări" aria-label="Setări">⚙️</button>
@@ -503,8 +515,14 @@
       <div class="dc">
         <aside class="dc-side">
           <div class="dc-server"><span class="srv-ico">S</span><b class="grow">SeboTECH</b><button type="button" class="icon hidden" id="chAdd" title="Canal nou" aria-label="Canal nou">＋</button></div>
-          <div class="h2" style="margin:14px 12px 6px">Canale text</div>
-          <div class="ch-list" id="chList"></div>
+          <div class="side-scroll">
+            <div class="side-h"><span class="grow">Mesaje directe</span><button type="button" class="icon" id="dmAdd" title="Mesaj privat nou" aria-label="Mesaj privat nou">＋</button></div>
+            <div class="ch-list" id="dmList"></div>
+            <div id="chSection" class="hidden">
+              <div class="side-h"><span class="grow">Canale</span></div>
+              <div class="ch-list" id="chList"></div>
+            </div>
+          </div>
           <div class="user-panel" id="userPanel"></div>
         </aside>
         <div class="dc-main">
@@ -520,7 +538,7 @@
               <button type="button" class="icon gif-btn" id="chatGif" title="Trimite un GIF" aria-label="Trimite un GIF">GIF</button>
               <button class="primary" type="submit" id="chatBtn">Trimite</button>
             </form>
-            <div class="fmt-hint note">**bold** *italic* __subliniat__ ~~tăiat~~ `cod` ||spoiler|| · @nume · ↑ editează ultimul mesaj</div>
+            <div class="fmt-hint note" id="fmtHint"></div>
           </div>
         </div>
         <aside class="dc-members" id="memList"></aside>
@@ -535,7 +553,7 @@
           <form id="postForm">
             <div class="row" style="align-items:flex-start">
               <div class="av" id="postAv"></div>
-              <textarea class="grow" id="postIn" maxlength="1200" placeholder="Postează grindul de azi: faze clutch, loadout-uri, rage quit-uri…"></textarea>
+              <textarea class="grow" id="postIn" maxlength="1200" placeholder="Ce mai e nou? Scrie ceva pentru toată lumea…"></textarea>
             </div>
             <div class="attprev hidden" id="postPrev" style="margin-top:10px;border:1px solid var(--line);border-radius:10px"></div>
             <div class="row" style="margin-top:10px;justify-content:flex-end">
@@ -552,25 +570,8 @@
 
     <!-- SQUAD -->
     <section id="v-squad" class="view hidden">
-      <div class="h2">Echipa</div>
+      <div class="h2">Membri</div>
       <div class="grid" id="squadGrid"></div>
-    </section>
-
-    <!-- STATS -->
-    <section id="v-stats" class="view hidden">
-      <div class="card daynav">
-        <button class="ghost" id="prevDay" aria-label="Ziua anterioară">◀</button>
-        <div class="label" id="dayLabel"></div>
-        <button class="ghost" id="nextDay" aria-label="Ziua următoare">▶</button>
-      </div>
-      <div class="card">
-        <div class="h2">Statisticile mele din ziua asta</div>
-        <div class="stats-grid" id="myStats"></div>
-      </div>
-      <div class="two">
-        <div class="card"><div class="h2" id="dayLbTitle">Clasamentul zilei</div><div id="dayLb"></div></div>
-        <div class="card"><div class="h2">Clasament general</div><div id="allLb"></div></div>
-      </div>
     </section>
 
     <!-- ME -->
@@ -590,22 +591,13 @@
               </div>
             </div>
             <div class="two" style="gap:10px">
-              <div><label for="mTag">Gamertag</label><input id="mTag" maxlength="24"></div>
+              <div><label for="mTag">Nume</label><input id="mTag" maxlength="24"></div>
               <div><label for="mPron">Pronume (opțional)</label><input id="mPron" maxlength="20" placeholder="ex. el/lui"></div>
             </div>
             <label for="mBio">Bio</label>
             <textarea id="mBio" maxlength="200" placeholder="Spune-le ceva despre tine"></textarea>
-            <div class="two" style="gap:10px">
-              <div><label for="mPlat">Platformă</label><select id="mPlat"></select></div>
-              <div><label for="mMode">Modul preferat</label><select id="mMode"></select></div>
-              <div><label for="mDrop">Unde aterizezi</label><input id="mDrop" maxlength="40" placeholder="ex. Tilted"></div>
-              <div><label for="mMain">Loadout principal</label><input id="mMain" maxlength="40" placeholder="ex. AR + shotgun"></div>
-            </div>
             <label for="mStatus">Status</label>
-            <input id="mStatus" maxlength="60" placeholder="ex. grind pe ranked până la 2 noaptea">
-            <label class="row" style="text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);gap:8px;cursor:pointer">
-              <input type="checkbox" id="mLfg" style="width:auto"> Caut echipă (apare insigna LFG)
-            </label>
+            <input id="mStatus" maxlength="60" placeholder="ex. disponibil după 8 seara">
             <label>Iconiță</label>
             <div class="emojis" id="mEmoji"></div>
             <label>Culoare</label>
@@ -625,12 +617,15 @@
       </div>
       <div class="card keys hidden" id="keysCard" style="max-width:640px">
         <div class="h2">Chei de acces · doar admin</div>
+        <div class="note" id="keysCount" style="margin:-4px 0 8px;font-weight:600"></div>
         <p class="note" style="margin-top:0">Cheile sunt salvate criptat, deci nu mai pot fi afișate. Copiază o cheie nouă imediat ce o creezi. Dacă eliberezi o cheie, persoana e scoasă și cheia poate fi folosită din nou.</p>
         <div id="keysList"></div>
-        <form class="row" id="newKeyForm" style="margin-top:12px">
-          <input id="newKeyLabel" maxlength="40" placeholder="Etichetă, ex. Cheie pentru Andrei">
-          <button type="submit" class="tiny" style="white-space:nowrap;padding:9px 12px">Cheie nouă</button>
+        <form class="row" id="newKeyForm" style="margin-top:12px;flex-wrap:wrap">
+          <input id="newKeyCount" type="number" min="1" max="200" value="1" style="width:84px" aria-label="Câte chei">
+          <input id="newKeyLabel" class="grow" maxlength="30" placeholder="Etichetă, ex. Andrei (opțional)" style="min-width:160px">
+          <button type="submit" class="tiny" id="newKeyBtn" style="white-space:nowrap;padding:9px 12px">Generează</button>
         </form>
+        <div class="note" style="margin-top:6px;font-size:12.5px">Poți genera până la 200 de chei odată, de câte ori vrei. Fiecare cheie merge pentru o singură persoană.</div>
         <div id="newKeyOut"></div>
       </div>
       <div style="max-width:640px;margin-top:4px"><button type="button" id="signOutBtn">Deconectare</button></div>
