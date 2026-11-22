@@ -8,10 +8,18 @@ const edit = (p, fn) => { const f = P(p), s = fs.readFileSync(f, "utf8"), n = fn
 edit("app/src/main/AndroidManifest.xml", s => {
   const perms = ["android.permission.RECORD_AUDIO", "android.permission.MODIFY_AUDIO_SETTINGS", "android.permission.POST_NOTIFICATIONS",
                  "android.permission.VIBRATE", "android.permission.WAKE_LOCK", "android.permission.FOREGROUND_SERVICE",
-                 "android.permission.FOREGROUND_SERVICE_MICROPHONE", "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"];
+                 "android.permission.FOREGROUND_SERVICE_MICROPHONE", "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+                 "android.permission.USE_FULL_SCREEN_INTENT"];
   for (const p of perms) if (!s.includes(p)) s = s.replace("</manifest>", `    <uses-permission android:name="${p}" />\n</manifest>`);
   if (!s.includes("default_notification_channel_id"))
     s = s.replace("</application>", `        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="messages" />\n    </application>`);
+  if (!s.includes("xmlns:tools")) s = s.replace("<manifest ", '<manifest xmlns:tools="http://schemas.android.com/tools" ');
+  if (!s.includes(".FolkMessagingService"))
+    s = s.replace("</application>", `        <service android:name="com.capacitorjs.plugins.pushnotifications.MessagingService" tools:node="remove" />
+        <service android:name=".FolkMessagingService" android:exported="false">
+            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
+        </service>
+        <receiver android:name=".CallActionReceiver" android:exported="false" />\n    </application>`);
   if (!s.includes(".CallService"))
     s = s.replace("</application>", `        <service android:name=".CallService" android:exported="false" android:foregroundServiceType="microphone|mediaPlayback" />\n    </application>`);
   return s;
@@ -40,6 +48,7 @@ edit("app/build.gradle", s => {
   // version from the workflow run number
   s = s.replace(/versionCode\s+\d+/, 'versionCode ((System.getenv("FOLKCHAT_VERSION_CODE") ?: "1") as Integer)');
   s = s.replace(/versionName\s+"[^"]*"/, 'versionName (System.getenv("FOLKCHAT_VERSION_NAME") ?: "1.0")');
+  if (!s.includes("firebase-messaging")) s = s.replace(/dependencies\s*\{/, m => m + '\n    implementation "com.google.firebase:firebase-messaging:25.0.1"');
   return s;
 });
 
@@ -151,6 +160,22 @@ public class CallPlugin extends Plugin {
         getContext().stopService(new Intent(getContext(), CallService.class));
         call.resolve();
     }
+
+    /** What the user tapped on the incoming-call screen ("answer" / "open"), once. */
+    @PluginMethod
+    public void takeAction(PluginCall call) {
+        com.getcapacitor.JSObject r = new com.getcapacitor.JSObject();
+        String a = MainActivity.pendingAction, cid = MainActivity.pendingCid;
+        MainActivity.pendingAction = null; MainActivity.pendingCid = null;
+        if (a != null) { r.put("action", a); r.put("cid", cid); }
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void cancelRing(PluginCall call) {
+        CallRinger.cancel(getContext());
+        call.resolve();
+    }
 }
 `);
 fs.writeFileSync(P(JAVA + "MainActivity.java"), `package com.folkchat.app;
@@ -159,11 +184,138 @@ import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    public static volatile boolean visible = false;
+    public static volatile String pendingAction = null, pendingCid = null;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(CallPlugin.class);
         super.onCreate(savedInstanceState);
     }
+
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        String a = intent == null ? null : intent.getStringExtra("fc_action");
+        if (a == null) return;
+        pendingAction = a;
+        pendingCid = intent.getStringExtra("fc_cid");
+        intent.removeExtra("fc_action");
+        CallRinger.cancel(this);
+        if (android.os.Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); }
+        if (bridge != null) bridge.triggerWindowJSEvent("folkcall");
+    }
+
+    @Override
+    public void onResume() { super.onResume(); visible = true; }
+
+    @Override
+    public void onPause() { super.onPause(); visible = false; }
 }
 `);
 console.log("added CallService, CallPlugin, MainActivity");
+
+// 5) calls ring like phone calls: data-only "call" pushes become a full-screen incoming-call notification
+//    (Answer / Decline, rings with the phone's ringtone, shows on the lock screen).
+fs.writeFileSync(P(JAVA + "FolkMessagingService.java"), `package com.folkchat.app;
+
+import androidx.annotation.NonNull;
+import com.google.firebase.messaging.RemoteMessage;
+import java.util.Map;
+
+public class FolkMessagingService extends com.capacitorjs.plugins.pushnotifications.MessagingService {
+    @Override
+    public void onMessageReceived(@NonNull RemoteMessage m) {
+        Map<String, String> d = m.getData();
+        if ("call".equals(d.get("type")) && m.getNotification() == null && !MainActivity.visible) {
+            try { CallRinger.show(this, d.get("cid"), d.get("from")); } catch (Exception e) { }
+        }
+        super.onMessageReceived(m);
+    }
+}
+`);
+fs.writeFileSync(P(JAVA + "CallRinger.java"), `package com.folkchat.app;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
+import android.media.AudioAttributes;
+import android.media.RingtoneManager;
+import android.os.Build;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.Person;
+
+public class CallRinger {
+    static final int ID = 4242;
+    static final String CHANNEL = "calls_ring";
+
+    public static void show(Context ctx, String cid, String from) {
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        if (from == null || from.isEmpty()) from = "Cineva";
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel ch = new NotificationChannel(CHANNEL, "Apeluri (sună ca un telefon)", NotificationManager.IMPORTANCE_HIGH);
+            ch.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
+            ch.enableVibration(true);
+            ch.setVibrationPattern(new long[] { 0, 900, 700, 900, 700, 900 });
+            ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            nm.createNotificationChannel(ch);
+        }
+        int fl = PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT;
+        Intent open = new Intent(ctx, MainActivity.class).putExtra("fc_action", "open").putExtra("fc_cid", cid)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        Intent ans = new Intent(ctx, MainActivity.class).putExtra("fc_action", "answer").putExtra("fc_cid", cid)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        Intent dec = new Intent(ctx, CallActionReceiver.class).setAction("com.folkchat.app.DECLINE").putExtra("fc_cid", cid);
+        PendingIntent pOpen = PendingIntent.getActivity(ctx, 41, open, fl);
+        PendingIntent pAns = PendingIntent.getActivity(ctx, 42, ans, fl);
+        PendingIntent pDec = PendingIntent.getBroadcast(ctx, 43, dec, fl);
+        Person caller = new Person.Builder().setName(from).setImportant(true).build();
+        NotificationCompat.Builder b = new NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(android.R.drawable.sym_call_incoming)
+            .setContentTitle(from + " te sună")
+            .setContentText("Apel FolkChat")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
+            .setOngoing(true)
+            .setAutoCancel(true)
+            .setTimeoutAfter(35000)
+            .setContentIntent(pOpen)
+            .setFullScreenIntent(pOpen, true);
+        try {
+            b.setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, pDec, pAns));
+        } catch (Exception e) {
+            b.addAction(0, "Respinge", pDec).addAction(0, "Răspunde", pAns);
+        }
+        Notification n = b.build();
+        n.flags |= Notification.FLAG_INSISTENT;   // keep ringing until answered / declined / timed out
+        nm.notify(ID, n);
+    }
+
+    public static void cancel(Context ctx) {
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) nm.cancel(ID);
+    }
+}
+`);
+fs.writeFileSync(P(JAVA + "CallActionReceiver.java"), `package com.folkchat.app;
+
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+
+/** "Respinge" on the incoming-call screen: stop ringing (the caller's side gives up after 30 s). */
+public class CallActionReceiver extends BroadcastReceiver {
+    @Override
+    public void onReceive(Context ctx, Intent intent) {
+        CallRinger.cancel(ctx);
+    }
+}
+`);
+console.log("added FolkMessagingService, CallRinger, CallActionReceiver");
