@@ -260,6 +260,20 @@
   .gif-item img{width:100%;display:block}
   .gif-item:hover{outline:2px solid var(--accent)}
   .gif-foot{font-size:10.5px;text-align:right;letter-spacing:.4px}
+  .emo-pop{position:fixed;z-index:60;width:360px;max-width:calc(100vw - 16px);height:420px;max-height:calc(100vh - 90px);display:flex;flex-direction:column;gap:6px;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+  .emo-pop input{width:100%}
+  .emo-tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line);padding-bottom:4px}
+  .emo-tabs.dim{opacity:.35;pointer-events:none}
+  .emo-tab{flex:1 0 auto;padding:4px 6px;border:none;background:none;font-size:18px;border-radius:8px;cursor:pointer}
+  .emo-tab:hover{background:var(--panel2)}
+  .emo-grid{flex:1;overflow-y:auto;position:relative}
+  .emo-group{content-visibility:auto;contain-intrinsic-size:auto 300px}
+  .emo-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);padding:8px 4px 4px;position:sticky;top:0;background:var(--panel);z-index:1}
+  .emo-sec{display:grid;grid-template-columns:repeat(auto-fill,minmax(38px,1fr))}
+  .emo{border:none;background:none;font-size:26px;line-height:1;padding:5px 0;border-radius:8px;cursor:pointer;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif}
+  .emo:hover{background:var(--panel3)}
+  .emo-tone{font-size:20px}
+  .emo-foot{font-size:11.5px;min-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* feed / squad / profile */
   .post .text{font-size:15px}
   .reacts button{background:transparent}
@@ -738,6 +752,7 @@
             <form class="composer" id="chatForm">
               <button type="button" class="icon" id="chatAttach" title="Atașează o imagine sau un video" aria-label="Atașează o imagine sau un video">📎</button>
               <textarea id="chatIn" rows="1" maxlength="2000" placeholder="Scrie un mesaj…"></textarea>
+              <button type="button" class="icon emo-btn" id="chatEmoji" title="Emoji" aria-label="Alege un emoji">😊</button>
               <button type="button" class="icon gif-btn" id="chatGif" title="Trimite un GIF" aria-label="Trimite un GIF">GIF</button>
               <button type="button" class="icon" id="chatVoice" title="Mesaj vocal" aria-label="Înregistrează un mesaj vocal">🎙️</button>
               <button class="primary" type="submit" id="chatBtn">Trimite</button>
@@ -762,6 +777,7 @@
             <div class="attprev hidden" id="postPrev" style="margin-top:10px;border:1px solid var(--line);border-radius:10px"></div>
             <div class="row" style="margin-top:10px;justify-content:flex-end">
               <button type="button" class="icon" id="postAttach" title="Atașează o imagine" aria-label="Atașează o imagine">📎</button>
+              <button type="button" class="icon emo-btn" id="postEmoji" title="Emoji" aria-label="Alege un emoji">😊</button>
               <button type="button" class="icon gif-btn" id="postGif" title="Adaugă un GIF" aria-label="Adaugă un GIF">GIF</button>
               <span class="note grow" id="postCount"></span>
               <button class="primary" type="submit" id="postBtn">Postează</button>
@@ -842,6 +858,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=25"></script>
+<script type="module" src="app.js?v=26"></script>
 </body>
 </html>
