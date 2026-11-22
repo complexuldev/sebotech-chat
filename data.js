@@ -4,14 +4,18 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, collection, getDoc, getDocs, onSnapshot, query, where, orderBy, limit,
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, collection, getDoc, getDocs, onSnapshot, query, where, orderBy, limit,
   writeBatch, setDoc, deleteDoc, updateDoc, serverTimestamp, increment, deleteField, startAfter, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { FIREBASE_CONFIG, MEDIA_URL } from "./config.js?v=12";
 
 const app = initializeApp(FIREBASE_CONFIG);
 const auth = getAuth(app);
-const db = getFirestore(app);
+// Keep a copy of what you've seen on this device (IndexedDB): chats open instantly, still readable
+// offline, and listeners resume from the cache instead of re-reading everything (fewer Firebase reads).
+let db;
+try { db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); }
+catch(e){ db = getFirestore(app); }
 let uid = null;
 
 const SNAP = { serverTimestamps: "estimate" };
@@ -332,14 +336,15 @@ export async function getPlaytime(id){ const s = await getDoc(doc(db, "playtime"
 export async function enableWebPush(vapidKey){
   const { getMessaging, getToken, isSupported } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js");
   if (!(await isSupported())) return null;
-  const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
+  const reg = await navigator.serviceWorker.register("sw.js");
   return getToken(getMessaging(app), { vapidKey, serviceWorkerRegistration: reg });
 }
 export async function saveDeviceToken(token){
   if (!uid || !token) return;
   const ref = doc(db, "tokens", uid);
   let list = [];
-  try { const s = await getDoc(ref); if (s.exists()) list = (s.data().list || []).filter(t => t !== token); } catch(e){}
+  const bare = t => String(t).replace(/^c2:/, "");     // "c2:" = Android app that shows full-screen incoming calls
+  try { const s = await getDoc(ref); if (s.exists()) list = (s.data().list || []).filter(t => bare(t) !== bare(token)); } catch(e){}
   list.push(token);
   await setDoc(ref, { list: list.slice(-10), ts: serverTimestamp() });
 }
