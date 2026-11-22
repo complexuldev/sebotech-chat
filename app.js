@@ -1,5 +1,5 @@
 // FolkChat – app UI. All user text is rendered with textContent (no HTML injection).
-import * as D from "./data.js?v=11";
+import * as D from "./data.js?v=12";
 import { OWNER_EMAIL, KLIPY_KEY, MEDIA_URL, VAPID_KEY } from "./config.js?v=11";
 
 const EMOJIS = ["😎","🐱","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
@@ -197,27 +197,160 @@ function startApp(){
   initChat();
 
   unsubs.push(D.watchPosts(list => { livePosts = list; mergePosts(); }, () => $("feedList").replaceChildren(h("div",{class:"empty",text:"Postările nu s-au putut încărca."}))));
-  unsubs.push(D.watchPresence(list => { presence = list; computeOnline(); }));
+  let actSig = "";
+  unsubs.push(D.watchPresence(list => {
+    presence = list; computeOnline();
+    const sig = list.map(x => x.id + ":" + (x.act ? x.act.n + x.act.k + x.act.s : "")).sort().join();
+    if (sig !== actSig){ actSig = sig; renderMembers(); renderSquad(); renderChatHeader(); }
+  }));
   initVoice();
 
   // Online status: written only when it actually changes (no heartbeats, no typing pings).
+  actRestore();
   presenceSet(true);
   let awayTimer = null;
   document.addEventListener("visibilitychange", () => {
     clearTimeout(awayTimer);
-    if (document.hidden){ if (!voice.room && !call.pair) awayTimer = setTimeout(() => presenceSet(false), 120000); }
+    // while you're in a game (activity set) or in voice, stay online even with FolkChat in the background
+    if (document.hidden){ if (!voice.room && !call.pair && !myAct) awayTimer = setTimeout(() => presenceSet(false), 120000); }
     else presenceSet(true);
   });
-  window.addEventListener("pagehide", () => { presenceSet(false); leaveVoice(true); if (call.pair) hangUp(true); });
+  window.addEventListener("pagehide", () => { actFlush(); presenceSet(false); leaveVoice(true); if (call.pair) hangUp(true); });
 
   bindUi();
 }
+// ---------- activity: "Joacă Fortnite · 1h 12m" + hours played per game ----------
+const ACT_KINDS = { play: "Joacă", listen: "Ascultă", watch: "Se uită la", custom: "" };
+const ACT_ICON = { play: "🎮", listen: "🎧", watch: "📺", custom: "💭" };
+const GAMES = [
+  ["Fortnite","🎯"],["Minecraft","⛏️"],["Roblox","🧱"],["Valorant","🔫"],["Counter-Strike 2","💣"],["League of Legends","⚔️"],
+  ["GTA V","🚗"],["Rocket League","⚽"],["Apex Legends","🪂"],["Call of Duty","🎖️"],["EA SPORTS FC","🏟️"],["Brawl Stars","⭐"],
+  ["Clash Royale","👑"],["Among Us","🚀"],["Rainbow Six Siege","🛡️"],["Overwatch 2","🦾"],["Dota 2","🐉"],["Genshin Impact","🌸"],
+  ["PUBG","🍳"],["The Sims 4","🏠"],["Terraria","🌳"],["Geometry Dash","🔷"],["Stumble Guys","🏃"],["Marvel Rivals","🦸"]];
+const LISTEN = [["Spotify","🎵"],["YouTube Music","🎶"],["Podcast","🎙️"]];
+const WATCH = [["YouTube","▶️"],["Netflix","🍿"],["Twitch","📡"],["Anime","🍥"]];
+const gameKey = n => String(n).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "joc";
+let myAct = null;           // { n, k, e, s }
+let actCk = 0;              // last time playtime was saved
+const ACT_SAVE_MS = 5 * 60000;
+function actStore(){ try { if (myAct) localStorage.setItem("fc:act:" + uid, JSON.stringify({ a: myAct, ck: actCk })); else localStorage.removeItem("fc:act:" + uid); } catch(e){} }
+function actRestore(){
+  try {
+    const d = JSON.parse(localStorage.getItem("fc:act:" + uid) || "null");
+    // only resume if the app was closed for a short while (a restart), not overnight
+    if (d && d.a && d.a.n && Date.now() - (d.ck || 0) < 15 * 60000){ myAct = d.a; actCk = Date.now(); }
+    else if (d) localStorage.removeItem("fc:act:" + uid);
+  } catch(e){}
+}
+// count the time since the last save (capped, so a sleeping PC doesn't add hours that weren't played)
+function actFlush(){
+  if (!myAct || myAct.k !== "play" || !actCk) return;
+  const now = Date.now(), sec = Math.min(now - actCk, ACT_SAVE_MS + 60000) / 1000;
+  actCk = now; actStore();
+  if (sec >= 20) D.addPlaytime(gameKey(myAct.n), myAct.n, sec).catch(() => {});
+}
+setInterval(() => { if (myAct && myAct.k === "play") actFlush(); }, ACT_SAVE_MS);
+function setActivity(a){
+  actFlush();
+  myAct = a && a.n ? { n: String(a.n).trim().slice(0, 48), k: ACT_KINDS[a.k] !== undefined ? a.k : "play", e: (a.e || "").slice(0, 8), s: Date.now() } : null;
+  actCk = myAct ? Date.now() : 0;
+  actStore();
+  presenceSet(!document.hidden || !!myAct);
+  renderMembers(); renderSquad(); renderUserPanel(); renderChatHeader();
+}
+function actOf(id){
+  if (id === uid) return myAct;
+  if (!online.has(id)) return null;
+  const pr = presence.find(x => x.id === id);
+  const a = pr && pr.act;
+  return a && typeof a.n === "string" && a.n ? a : null;
+}
+function dur(ms){
+  const m = Math.max(0, Math.floor(ms / 60000)), hh = Math.floor(m / 60);
+  return hh ? hh + "h " + (m % 60) + "m" : m < 1 ? "acum" : m + "m";
+}
+const hours = sec => { const hh = sec / 3600; return hh >= 10 ? Math.round(hh) + " ore" : hh >= 1 ? hh.toFixed(1).replace(".", ",") + " ore" : Math.max(1, Math.round(sec / 60)) + " min"; };
+function actText(a){ return (ACT_KINDS[a.k] ? ACT_KINDS[a.k] + " " : "") + a.n; }
+// small line used in member lists: "🎮 Joacă Fortnite · 12m"
+function actLine(id, cls){
+  const a = actOf(id); if (!a) return null;
+  return h("div",{class:"act-line " + (cls || ""),title: actText(a)},
+    h("span",{class:"act-e",text: a.e || ACT_ICON[a.k] || "🎮"}),
+    h("span",{class:"act-n",text: actText(a)}),
+    a.s ? h("span",{class:"act-t","data-s":String(a.s),text:" · " + dur(Date.now() - a.s)}) : null);
+}
+setInterval(() => { for (const el of document.querySelectorAll(".act-t[data-s]")) el.textContent = (el.dataset.p != null ? el.dataset.p : " · ") + dur(Date.now() - (+el.dataset.s)); }, 30000);
+// bigger card in the profile window, plus hours played
+function actCard(id){
+  const a = actOf(id);
+  const box = h("div",{class:"act-card"});
+  if (a) box.append(h("div",{class:"h2",style:"margin:0 0 8px",text: a.k === "play" ? "Joacă acum" : "Activitate"}),
+    h("div",{class:"row",style:"gap:12px"}, h("div",{class:"act-big",text: a.e || ACT_ICON[a.k] || "🎮"}),
+      h("div",{class:"grow",style:"min-width:0"}, h("b",{text:a.n}), h("div",{class:"note act-t","data-s":String(a.s || Date.now()),"data-p":"de ",text:"de " + dur(Date.now() - (a.s || Date.now()))}))));
+  const pt = h("div");
+  box.append(pt);
+  D.getPlaytime(id).then(g => {
+    let list = Object.values(g).filter(x => x && x.n && x.sec > 0);
+    if (id === uid && myAct && myAct.k === "play" && actCk){   // include the minutes not saved yet
+      const k = gameKey(myAct.n), extra = (Date.now() - actCk) / 1000, cur = g[k];
+      if (cur) list = list.map(x => x === cur ? Object.assign({}, x, { sec: x.sec + extra }) : x); else list.push({ n: myAct.n, sec: extra, last: Date.now() });
+    }
+    list.sort((x, y) => y.sec - x.sec);
+    if (!list.length){ if (!a) box.remove(); else if (a.k === "play") pt.append(h("div",{class:"note",style:"margin-top:8px;font-size:12.5px",text:"Orele jucate se adună de acum."})); return; }
+    const total = list.reduce((t, x) => t + x.sec, 0), max = list[0].sec;
+    pt.append(h("div",{class:"h2",style:"margin:" + (a ? "16px" : "0") + " 0 8px",text:"Ore jucate · " + hours(total) + " în total"}),
+      ...list.slice(0, 8).map(x => {
+        const g0 = GAMES.find(g => gameKey(g[0]) === gameKey(x.n));
+        return h("div",{class:"pt-row"},
+          h("span",{class:"pt-e",text: g0 ? g0[1] : "🎮"}),
+          h("div",{class:"grow",style:"min-width:0"},
+            h("div",{class:"row",style:"gap:8px"}, h("span",{class:"grow pt-n",text:x.n}), h("b",{class:"pt-h",text:hours(x.sec)})),
+            h("div",{class:"pt-bar"}, h("i",{style:"width:" + Math.max(3, Math.round(x.sec / max * 100)) + "%"})),
+            x.last ? h("div",{class:"note",style:"font-size:11px",text:"Ultima dată " + ago(x.last)}) : null));
+      }));
+  }).catch(() => { if (!a) box.remove(); });
+  return box;
+}
+function activityModal(){
+  let kind = myAct ? myAct.k : "play";
+  const search = h("input",{maxlength:"48",placeholder:"Caută sau scrie alt joc…",autocomplete:"off"});
+  const emo = h("input",{maxlength:"8",placeholder:"🎮",style:"width:64px;text-align:center;flex:none"});
+  const grid = h("div",{class:"act-grid"}), tabs = h("div",{class:"seg"});
+  const cur = h("div");
+  const drawCur = () => cur.replaceChildren(myAct ? h("div",{class:"act-cur"},
+      h("span",{class:"act-big",text: myAct.e || ACT_ICON[myAct.k]}),
+      h("div",{class:"grow",style:"min-width:0"}, h("b",{text: actText(myAct)}), h("div",{class:"note act-t","data-s":String(myAct.s),"data-p":"de ",text:"de " + dur(Date.now() - myAct.s)})),
+      h("button",{type:"button",class:"danger tiny",text:"Oprește",onclick:() => { setActivity(null); drawCur(); }})) : h("div",{class:"note",style:"margin-bottom:4px",text:"Nu ai nicio activitate setată. Prietenii văd ce alegi aici lângă numele tău."}));
+  const pick = (n, e) => { setActivity({ n, k: kind, e: e || "" }); closeProfile(); flash(ACT_ICON[kind] + " " + actText(myAct)); };
+  const draw = () => {
+    tabs.replaceChildren(...[["play","🎮 Joc"],["listen","🎧 Ascult"],["watch","📺 Mă uit"],["custom","💭 Altceva"]].map(([k, l]) => h("button",{type:"button",class:k === kind ? "on" : "",text:l,onclick:() => { kind = k; draw(); }})));
+    const src = kind === "play" ? GAMES : kind === "listen" ? LISTEN : kind === "watch" ? WATCH : [];
+    const q = search.value.trim().toLowerCase();
+    const items = src.filter(g => !q || g[0].toLowerCase().includes(q));
+    grid.replaceChildren(...items.map(([n, e]) => h("button",{type:"button",class:"act-opt",onclick:() => pick(n, e)}, h("span",{class:"act-e",text:e}), h("span",{text:n}))));
+    if (q && !items.some(g => g[0].toLowerCase() === q)) grid.prepend(h("button",{type:"button",class:"act-opt add",onclick:() => pick(search.value.trim(), emo.value.trim())}, h("span",{class:"act-e",text: emo.value.trim() || ACT_ICON[kind]}), h("span",{text:"„" + search.value.trim() + "”"})));
+    search.placeholder = kind === "play" ? "Caută sau scrie alt joc…" : kind === "custom" ? "ex. Învăț la mate" : "Scrie ce…";
+  };
+  search.oninput = draw; emo.oninput = draw;
+  search.onkeydown = e => { if (e.key === "Enter" && search.value.trim()){ e.preventDefault(); const exact = (kind === "play" ? GAMES : kind === "listen" ? LISTEN : kind === "watch" ? WATCH : []).find(g => g[0].toLowerCase() === search.value.trim().toLowerCase()); pick(exact ? exact[0] : search.value.trim(), exact ? exact[1] : emo.value.trim()); } };
+  drawCur(); draw();
+  openModal(h("div",{class:"modal small"},
+    h("button",{class:"close",type:"button","aria-label":"Închide",text:"✕",onclick:closeProfile}),
+    h("div",{class:"bd",style:"margin-top:0;padding-top:20px"},
+      h("div",{class:"nm",text:"🎮 Ce faci acum?"}), cur,
+      h("div",{style:"margin-top:12px"}, tabs),
+      h("div",{class:"row",style:"gap:8px;margin-top:10px"}, emo, search),
+      grid,
+      h("div",{class:"note",style:"font-size:12px;margin-top:10px",text:"Orele jucate se adună cât timp ai FolkChat deschis (și în tray). Activitatea se oprește singură când închizi aplicația."}))));
+  setTimeout(() => { if (!isMobileLayout()) search.focus(); }, 50);
+}
 let presState = null;
 function presenceSet(on){
-  const want = (on ? "1" : "0") + "|" + (voice.room || "");
+  const a = on ? myAct : null;
+  const want = (on ? "1" : "0") + "|" + (voice.room || "") + "|" + (a ? a.n + a.k + a.s : "");
   if (want === presState) return;
   presState = want;
-  D.setPresence(on, voice.room || "").catch(() => { presState = null; });
+  D.setPresence(on, voice.room || "", a).catch(() => { presState = null; });
 }
 function saveProfileCache(){
   try { localStorage.setItem("fc:profiles:" + uid, JSON.stringify(profiles)); }
@@ -815,7 +948,8 @@ function renderUserPanel(){
   if (!me) return;
   $("userPanel").replaceChildren(
     h("div",{class:"up-me",onclick:() => openProfile(uid)}, avatar(uid,"sm"),
-      h("div",{class:"grow",style:"min-width:0"}, h("div",{class:"up-name",text:me.tag}), h("div",{class:"up-st",text: me.status || "Online"}))),
+      h("div",{class:"grow",style:"min-width:0"}, h("div",{class:"up-name",text:me.tag}), myAct ? h("div",{class:"up-st act-on",text:(myAct.e || ACT_ICON[myAct.k]) + " " + actText(myAct)}) : h("div",{class:"up-st",text: me.status || "Online"}))),
+    h("button",{type:"button",class:"icon" + (myAct ? " act-btn-on" : ""),title: myAct ? actText(myAct) + " · schimbă" : "Setează ce joci / faci","aria-label":"Activitate",text:"🎮",onclick:activityModal}),
     h("button",{type:"button",class:"icon",title: settings.sound ? "Oprește sunetele" : "Pornește sunetele","aria-label":"Sunete",text: settings.sound ? "🔊" : "🔇",onclick:() => { settings.sound = !settings.sound; saveSettings(); renderUserPanel(); if (settings.sound) playSfx("test"); }}),
     h("button",{type:"button",class:"icon",title:"Setări","aria-label":"Setări",text:"⚙️",onclick:openSettings}));
 }
@@ -826,7 +960,7 @@ function renderChatHeader(){
     h("button",{type:"button",class:"icon dc-burger",title:"Conversații","aria-label":"Arată conversațiile",text:"☰",onclick:() => document.querySelector(".dc").classList.toggle("drawer")}),
     dm && other ? avatar(dmOther(curCh),"sm") : h("span",{class:"ch-ico big",text: c ? (c.emoji || "#") : "💬"}),
     h("b",{text: dm ? (other ? other.tag : "?") : c ? c.name : "Mesaje"}),
-    dm ? h("span",{class:"ch-topic grow",text:"🔒 Conversație privată" + (online.has(dmOther(curCh)) ? " · online" : "")}) : c && c.topic ? h("span",{class:"ch-topic grow",text:c.topic}) : h("span",{class:"grow"}),
+    dm ? h("span",{class:"ch-topic grow",text: (a => a ? (a.e || ACT_ICON[a.k]) + " " + actText(a) : "🔒 Conversație privată" + (online.has(dmOther(curCh)) ? " · online" : ""))(actOf(dmOther(curCh)))}) : c && c.topic ? h("span",{class:"ch-topic grow",text:c.topic}) : h("span",{class:"grow"}),
     dm && other ? h("button",{type:"button",class:"icon callbtn" + (call.pair ? " off" : ""),title: call.pair ? "Ești deja într-un apel" : "Apel vocal","aria-label":"Sună",text:"📞",onclick:() => startCallTo(dmOther(curCh))}) : null,
     has ? h("button",{type:"button",class:"icon",title: settings.muted[curCh] ? "Activează notificările" : "Dezactivează notificările","aria-label":"Mute",text: settings.muted[curCh] ? "🔕" : "🔔",onclick:() => { settings.muted[curCh] = !settings.muted[curCh]; if (!settings.muted[curCh]) delete settings.muted[curCh]; saveSettings(); renderChatHeader(); renderChannels(); renderChatBadge(); }}) : null,
     h("button",{type:"button",class:"icon dc-memtoggle",title:"Membri","aria-label":"Arată membrii",text:"👥",onclick:() => document.querySelector(".dc").classList.toggle("nomembers")})].filter(Boolean));
@@ -1012,7 +1146,7 @@ function renderMembers(){
   const ids = Object.keys(profiles).sort((a,b) => P(a).tag.localeCompare(P(b).tag));
   const on = ids.filter(id => online.has(id)), off = ids.filter(id => !online.has(id));
   const row = id => { const p = P(id); return h("div",{class:"mem" + (online.has(id) ? "" : " off"),onclick:() => openProfile(id)}, avatar(id,"sm"),
-    h("div",{class:"grow",style:"min-width:0"}, h("div",{class:"mem-n",style:"color:" + accent(p)}, p.tag, p.role === "admin" ? " 👑" : ""), p.status ? h("div",{class:"mem-s",text:p.status}) : null),
+    h("div",{class:"grow",style:"min-width:0"}, h("div",{class:"mem-n",style:"color:" + accent(p)}, p.tag, p.role === "admin" ? " 👑" : ""), actLine(id, "mem-s") || (p.status ? h("div",{class:"mem-s",text:p.status}) : null)),
     id !== uid ? h("button",{type:"button",class:"icon mem-dm",title:"Mesaj privat","aria-label":"Mesaj privat către " + p.tag,text:"💬",onclick:ev => { ev.stopPropagation(); openDm(id); }}) : null); };
   $("memList").replaceChildren(h("div",{class:"h2",text:"Online — " + on.length}), ...on.map(row),
     ...(off.length ? [h("div",{class:"h2",style:"margin-top:14px",text:"Offline — " + off.length})] : []), ...off.map(row));
@@ -1265,6 +1399,7 @@ function renderSquad(){
       h("div",{class:"bd"}, avatar(id),
         h("div",{class:"nm",style:"color:"+accent(p)}, p.tag),
         h("div",{class:"row",style:"gap:6px;margin-top:4px;flex-wrap:wrap"}, p.pronouns ? h("span",{class:"pill",text:p.pronouns}) : null, p.role === "admin" ? h("span",{class:"pill",text:"admin"}) : null, online.has(id) ? h("span",{class:"pill",style:"color:var(--green)",text:"● online"}) : null),
+        actLine(id, "pc-act"),
         h("div",{class:"bio",text:p.bio || p.status || "Fără bio încă."}),
         id !== uid ? h("button",{type:"button",class:"tiny",style:"margin-top:10px",text:"💬 Mesaj privat",onclick:ev => { ev.stopPropagation(); openDm(id); }}) : null));
   }));
@@ -1281,10 +1416,12 @@ function profileView(id, p, preview){
       h("div",{class:"nm"}, h("span",{style:"color:"+accent(p),text:p.tag}), p.pronouns ? h("span",{class:"note",style:"font-size:13px;font-weight:500",text:p.pronouns}) : null, p.role === "admin" ? h("span",{class:"pill",text:"admin"}) : null),
       p.status ? h("div",{class:"note",style:"margin-top:2px",text:"“" + p.status + "”"}) : null,
       p.bio ? h("p",{style:"margin:12px 0 0;white-space:pre-wrap",text:p.bio}) : null,
+      preview ? null : actCard(id),
       h("div",{class:"facts"}, fact("Membru din", p.joined ? new Date(p.joined).toLocaleDateString("ro-RO",{day:"numeric",month:"short",year:"numeric"}) : ""), fact("Status", online.has(id) ? "● Online" : "Offline")),
       theirPosts.length ? h("div",{class:"h2",style:"margin-top:18px"},"Postări recente") : null,
       theirPosts.map(x => h("div",{class:"fact",style:"margin-bottom:8px"}, h("div",{class:"k",text:ago(x.ts)}), h("div",{class:"v",style:"font-weight:500;white-space:pre-wrap",text: !x.text ? (x.img ? "🖼️ imagine" : "🎞️ GIF") : x.text.length > 220 ? x.text.slice(0,220)+"…" : x.text}))),
       preview ? null : h("div",{class:"row",style:"margin-top:16px;gap:8px"},
+        id === uid ? h("button",{type:"button",text:"🎮 Activitate",onclick:activityModal}) : null,
         id === uid ? h("button",{class:"primary",type:"button",text:"Editează profilul",onclick:()=>{ closeProfile(); location.hash = "#me"; }})
                    : h("div",{class:"row",style:"gap:8px;flex-wrap:wrap"},
                        h("button",{class:"primary",type:"button",text:"💬 Trimite mesaj privat",onclick:()=>{ closeProfile(); openDm(id); }}),
