@@ -51,7 +51,7 @@ jobs:
           # --safe-domain: Google / Firebase sign-in pages stay inside the app window.
           pake "$env:APP_URL" `
             --name FolkChat `
-            --icon desktop/icon.ico `
+            --icon desktop/icon.png `
             --width 1200 --height 800 `
             --min-width 420 --min-height 560 `
             --show-system-tray `
