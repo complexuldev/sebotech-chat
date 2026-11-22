@@ -1,6 +1,6 @@
 // SeboTECH CHAT – app UI. All user text is rendered with textContent (no HTML injection).
-import * as D from "./data.js";
-import { OWNER_EMAIL, KLIPY_KEY } from "./config.js";
+import * as D from "./data.js?v=9";
+import { OWNER_EMAIL, KLIPY_KEY } from "./config.js?v=9";
 
 const EMOJIS = ["😎","🐱","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
 const COLORS = ["#00e5ff","#a855f7","#ff4d6d","#ffd23f","#3ef08a","#ff9f43","#5b6cff","#ff6ad5","#ffffff"];
