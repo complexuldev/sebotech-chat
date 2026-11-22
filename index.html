@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://api.klipy.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.workers.dev https://www.gstatic.com; media-src 'self' blob:; worker-src 'self'; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.klipy.com https://*.googleusercontent.com https://*.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0b0b0f">
 <title>FolkChat</title>
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -476,6 +476,14 @@
     .incoming button{padding:9px 11px;font-size:13px}
     .incoming .note{white-space:nowrap}
   }
+  /* phones: hide the tab bar while the keyboard is open; the chat height is set by fitChat() */
+  @media (max-width:760px){
+    body.kbd nav.tabs{display:none}
+    body.kbd main{padding-bottom:0}
+    main:has(#v-chat:not(.hidden)){padding-top:8px;padding-left:8px;padding-right:8px}
+    .dc .composer textarea{font-size:16px}
+    .dc{min-height:0}
+  }
   /* mobile */
   @media (max-width:900px){
     .dc{grid-template-columns:1fr;height:calc(100vh - 150px)}
@@ -681,6 +689,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=11"></script>
+<script type="module" src="app.js?v=12"></script>
 </body>
 </html>
