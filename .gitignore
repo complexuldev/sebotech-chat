@@ -1,0 +1,7 @@
+node_modules/
+mobile/android/
+mobile/dist/
+cloudflare/.wrangler/
+*.p12
+*.jks
+google-services.json
