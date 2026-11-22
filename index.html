@@ -2,7 +2,7 @@
 <html lang="ro">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://api.klipy.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.workers.dev https://www.gstatic.com; media-src 'self' blob: https://*.workers.dev; worker-src 'self'; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.klipy.com https://*.googleusercontent.com https://*.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://api.klipy.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.workers.dev wss://*.workers.dev https://www.gstatic.com; media-src 'self' blob: https://*.workers.dev; worker-src 'self'; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.klipy.com https://*.googleusercontent.com https://*.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0b0b0f">
@@ -273,6 +273,7 @@
   .emo{border:none;background:none;font-size:26px;line-height:1;padding:5px 0;border-radius:8px;cursor:pointer;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif}
   .emo:hover{background:var(--panel3)}
   .emo-tone{font-size:20px}
+  .stage-q{font-size:11.5px;white-space:nowrap;padding:2px 8px;border-radius:99px;background:rgba(255,255,255,.07);flex:none}
   .txt.jumbo{font-size:44px;line-height:1.2;letter-spacing:1px;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif}
   .txt.jumbo .edited{font-size:12px;letter-spacing:0}
   body.compact .txt.jumbo{font-size:32px}
@@ -861,6 +862,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=30"></script>
+<script type="module" src="app.js?v=31"></script>
 </body>
 </html>
