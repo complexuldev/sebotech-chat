@@ -19,6 +19,8 @@
     "allow-overlay-close",
     "allow-overlay-interactive",
     "allow-set-unread",
-    "allow-app-version"
+    "allow-app-version",
+    "allow-sys-audio-start",
+    "allow-sys-audio-stop"
   ]
 }
