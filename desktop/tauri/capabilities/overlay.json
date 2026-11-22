@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "The bundled overlay page: listens for updates, can be dragged, and tells the app its size.",
+  "windows": ["overlay"],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-start-dragging",
+    "allow-overlay-fit",
+    "allow-overlay-interactive"
+  ]
+}
