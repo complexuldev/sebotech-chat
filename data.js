@@ -16,7 +16,7 @@ let uid = null;
 
 const SNAP = { serverTimestamps: "estimate" };
 const ms = v => (v && typeof v.toMillis === "function") ? v.toMillis() : (typeof v === "number" ? v : Date.now());
-const rows = snap => snap.docs.map(d => { const x = d.data(SNAP); for (const k of ["ts","joined","seen"]) if (k in x) x[k] = ms(x[k]); return { id: d.id, ...x }; });
+const rows = snap => snap.docs.map(d => { const x = d.data(SNAP); for (const k of ["ts","joined","seen","edited"]) if (k in x) x[k] = ms(x[k]); return { id: d.id, ...x }; });
 const limitsRef = () => doc(db, "limits", uid);
 
 export async function sha256(s){
@@ -84,6 +84,7 @@ export function deleteKey(hash){ return deleteDoc(doc(db, "keys", hash)); }
 export function watchMembers(cb, err){ return onSnapshot(collection(db, "members"), s => cb(rows(s), s.metadata.fromCache), err); }
 export function saveProfile(p){
   return updateDoc(doc(db, "members", uid), {
+    avatar: p.avatar || "", pronouns: p.pronouns || "",
     tag: p.tag, emoji: p.emoji, platform: p.platform, bio: p.bio, color: p.color, banner: p.banner,
     mode: p.mode, drop: p.drop, main: p.main, status: p.status, lfg: !!p.lfg
   });
@@ -123,6 +124,41 @@ export async function pruneChat(days){
   for (const d of old.docs) await deleteDoc(d.ref);
   const oldImgs = await getDocs(query(collection(db, "images"), where("ts", "<", new Date(Date.now() - days * 86400000)), limit(50)));
   for (const d of oldImgs.docs) if (d.data().kind === "chat") await deleteDoc(d.ref);
+}
+
+// ---------- channels (Discord-style) ----------
+export function watchChannels(cb){ return onSnapshot(collection(db, "channels"), s => cb(rows(s)), () => {}); }
+export async function createChannel(c){
+  const ref = doc(collection(db, "channels"));
+  await setDoc(ref, { name: c.name, emoji: c.emoji || "", topic: c.topic || "", pos: c.pos | 0, ts: serverTimestamp() });
+  return ref.id;
+}
+export function updateChannel(id, f){ return updateDoc(doc(db, "channels", id), f); }
+export function deleteChannel(id){ return deleteDoc(doc(db, "channels", id)); }
+export function watchMsgs(cid, n, cb, err){
+  return onSnapshot(query(collection(db, "channels", cid, "msgs"), orderBy("ts", "desc"), limit(n)), s => cb(rows(s), s.metadata.fromCache), err);
+}
+export async function sendMsg(cid, text, att, extra){
+  const b = writeBatch(db);
+  const body = addAtt(b, Object.assign({ uid, text, ts: serverTimestamp() }, extra || {}), att, "chat");
+  b.set(doc(collection(db, "channels", cid, "msgs")), body);
+  b.set(limitsRef(), { t: serverTimestamp() });
+  await b.commit();
+}
+export function editMsg(cid, id, text){ return updateDoc(doc(db, "channels", cid, "msgs", id), { text, edited: serverTimestamp() }); }
+export async function deleteMsg(cid, id, img){
+  const b = writeBatch(db);
+  b.delete(doc(db, "channels", cid, "msgs", id));
+  if (img) b.delete(doc(db, "images", img));
+  await b.commit();
+}
+export function reactMsg(cid, id, key, on){ return updateDoc(doc(db, "channels", cid, "msgs", id), { ["rx." + key + "_" + uid]: on ? true : deleteField() }); }
+export async function pruneChannels(ids, days){
+  const cut = new Date(Date.now() - days * 86400000);
+  for (const cid of ids){
+    const old = await getDocs(query(collection(db, "channels", cid, "msgs"), where("ts", "<", cut), limit(100)));
+    for (const d of old.docs){ const img = d.data().img; await deleteDoc(d.ref); if (img) await deleteDoc(doc(db, "images", img)).catch(() => {}); }
+  }
 }
 
 // ---------- feed ----------
@@ -167,6 +203,6 @@ export async function saveStats(day, cur, tot){
 
 // ---------- presence ----------
 export function watchPresence(cb){ return onSnapshot(collection(db, "presence"), s => cb(rows(s)), () => {}); }
-export function setPresence(typing){ return setDoc(doc(db, "presence", uid), { seen: serverTimestamp(), typing: !!typing }); }
+export function setPresence(typing, ch){ return setDoc(doc(db, "presence", uid), { seen: serverTimestamp(), typing: !!typing, ch: String(ch || "").slice(0, 64) }); }
 
 export const errCode = e => (e && e.code ? String(e.code).replace(/^firestore\//, "") : "unknown");
