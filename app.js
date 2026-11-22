@@ -1,6 +1,6 @@
 // FolkChat – app UI. All user text is rendered with textContent (no HTML injection).
-import * as D from "./data.js?v=14";
-import { OWNER_EMAIL, KLIPY_KEY, MEDIA_URL, VAPID_KEY } from "./config.js?v=11";
+import * as D from "./data.js?v=15";
+import { OWNER_EMAIL, KLIPY_KEY, MEDIA_URL, VAPID_KEY } from "./config.js?v=12";
 
 const EMOJIS = ["😎","🐱","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
 const COLORS = ["#00e5ff","#a855f7","#ff4d6d","#ffd23f","#3ef08a","#ff9f43","#5b6cff","#ff6ad5","#ffffff"];
@@ -220,6 +220,67 @@ function startApp(){
 
   bindUi();
 }
+// ---------- admin: usage of Cloudflare (R2) + Firebase (Firestore) ----------
+let usageData = null, usageBusy = false, usageAt = 0;
+const fmtBytes = b => b >= 1073741824 ? (b / 1073741824).toFixed(2).replace(".", ",") + " GB" : b >= 1048576 ? (b / 1048576).toFixed(1).replace(".", ",") + " MB" : b >= 1024 ? Math.round(b / 1024) + " KB" : (b | 0) + " B";
+const fmtNum = n => Math.round(n || 0).toLocaleString("ro-RO");
+function usageBar(used, limit, label, sub){
+  const pct = limit ? Math.min(100, used / limit * 100) : 0;
+  const cls = pct >= 90 ? "bad" : pct >= 70 ? "warn" : "ok";
+  return h("div",{class:"us-row"},
+    h("div",{class:"row",style:"gap:8px"}, h("b",{class:"grow",text:label}), h("span",{class:"us-val",text:sub})),
+    h("div",{class:"us-bar " + cls}, h("i",{style:"width:" + Math.max(pct ? 1.5 : 0, pct) + "%"})),
+    h("div",{class:"note",style:"font-size:11.5px",text: pct.toFixed(pct < 10 ? 1 : 0).replace(".", ",") + "% din limita gratuită"}));
+}
+async function renderUsage(force){
+  const box = $("usageBox"); if (!box) return;
+  if (!isAdmin){ box.replaceChildren(h("div",{class:"empty",text:"Doar adminul vede această pagină."})); return; }
+  if (!D.mediaOn()){ box.replaceChildren(h("div",{class:"empty",text:"Worker-ul Cloudflare nu e conectat încă (MEDIA_URL gol în config.js)."})); return; }
+  if (usageBusy) return;
+  if (!force && usageData && Date.now() - usageAt < 60000){ drawUsage(); return; }
+  usageBusy = true;
+  if (!usageData) box.replaceChildren(h("div",{class:"empty",text:"Se încarcă…"}));
+  try { usageData = await D.getUsage(force); usageAt = Date.now(); }
+  catch(e){ box.replaceChildren(h("div",{class:"empty",text:"Nu am putut citi utilizarea: " + (e.message || e)})); usageBusy = false; return; }
+  usageBusy = false;
+  drawUsage();
+}
+function drawUsage(){
+  const box = $("usageBox"), d = usageData; if (!box || !d) return;
+  const r2 = d.r2 || {}, fs = d.firestore || {};
+  const left = fs.resetAt ? Math.max(0, fs.resetAt - Date.now()) : 0;
+  const resetTxt = fs.resetAt ? "Se resetează în " + Math.floor(left / 3600000) + "h " + Math.floor(left % 3600000 / 60000) + "m (la " + new Date(fs.resetAt).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" }) + ")" : "";
+  const cat = (ico, name, c, extra) => h("div",{class:"us-cat"}, h("span",{text:ico}), h("span",{class:"grow",text:name + (extra ? " · " + extra : "")}), h("span",{class:"note",text:fmtNum(c && c.n) + " fișiere"}), h("b",{text:fmtBytes(c && c.b)}));
+  let fsCard;
+  if (fs.error){
+    const why = fs.status === 501 ? "Contul de serviciu Firebase nu e conectat la worker încă (secretul FIREBASE_SA_JSON din GitHub). Tot el pornește și notificările push pe telefon."
+              : fs.status === 403 ? "Contului de serviciu îi lipsește rolul „Monitoring Viewer” în Google Cloud (IAM)."
+              : "Eroare: " + fs.error;
+    fsCard = h("div",{class:"us-card"}, h("div",{class:"us-h",text:"🔥 Firebase (Firestore)"}), h("div",{class:"note",text:why}));
+  } else {
+    const L = fs.limits || { reads: 50000, writes: 20000, deletes: 20000 };
+    fsCard = h("div",{class:"us-card"},
+      h("div",{class:"us-h"}, h("span",{class:"grow",text:"🔥 Firebase (Firestore) · azi"}), h("span",{class:"note",text:resetTxt})),
+      usageBar(fs.reads, L.reads, "📖 Citiri", fmtNum(fs.reads) + " / " + fmtNum(L.reads)),
+      usageBar(fs.writes, L.writes, "✏️ Scrieri", fmtNum(fs.writes) + " / " + fmtNum(L.writes)),
+      usageBar(fs.deletes, L.deletes, "🗑️ Ștergeri", fmtNum(fs.deletes) + " / " + fmtNum(L.deletes)),
+      fs.week ? h("div",{class:"note",style:"margin-top:8px",text:"Ultimele 7 zile: " + fmtNum(fs.week.reads) + " citiri · " + fmtNum(fs.week.writes) + " scrieri · " + fmtNum(fs.week.deletes) + " ștergeri (media " + fmtNum(fs.week.reads / 7) + " citiri/zi)"}) : null,
+      h("div",{class:"note",style:"font-size:11.5px;margin-top:6px",text:"Planul gratuit Spark: dacă treci de limită, Firebase doar se oprește până a doua zi, nu plătești nimic. Cifrele Google au o întârziere de câteva minute."}));
+  }
+  const over = r2.bytes > r2.limitBytes;
+  box.replaceChildren(
+    h("div",{class:"row",style:"gap:10px;flex-wrap:wrap;margin-bottom:12px"},
+      h("div",{class:"grow"}, h("div",{class:"lb-title",text:"📊 Utilizare servere"}), h("div",{class:"note",style:"font-size:12px",text:"Doar tu (admin) vezi pagina asta · actualizat la " + new Date(d.at).toLocaleTimeString("ro-RO")})),
+      h("button",{type:"button",class:"tiny",text:"↻ Reîmprospătează",onclick:() => renderUsage(true)})),
+    h("div",{class:"us-card"},
+      h("div",{class:"us-h"}, h("span",{class:"grow",text:"☁️ Cloudflare R2 · stocare"}), h("span",{class:"note",text: over ? "⚠️ peste limită: ~$" + ((r2.bytes - r2.limitBytes) / 1073741824 * 0.015).toFixed(2) + "/lună" : "Cost: $0,00"})),
+      usageBar(r2.bytes || 0, r2.limitBytes || 10737418240, "💾 Spațiu folosit", fmtBytes(r2.bytes || 0) + " / 10 GB"),
+      cat("🎬", "Video", r2.video, "se șterg singure după 3 zile"),
+      cat("🖼️", "Imagini", r2.image),
+      cat("🎤", "Mesaje vocale", r2.voice),
+      h("div",{class:"note",style:"font-size:11.5px;margin-top:6px",text:"Descărcările sunt mereu gratuite la Cloudflare. Gratuit și: 1 milion de încărcări și 10 milioane de vizualizări pe lună. Worker-ul: 100.000 de cereri/zi gratis (peste, doar se oprește până a doua zi)."})),
+    fsCard);
+}
 // ---------- weekly leaderboard: most hours played (Monday–Sunday) ----------
 let lbWeek = 0, lbTimer = null, lbData = null, lbAt = 0;
 async function renderLeaderboard(force){
@@ -426,15 +487,17 @@ function computeOnline(){
 }
 
 // routing
-const VIEWS = ["chat","feed","squad","me"];
+const VIEWS = ["chat","feed","squad","me","usage"];
 function route(){
   const v = (location.hash || "#chat").slice(1);
-  view = VIEWS.includes(v) ? v : "chat";
+  view = VIEWS.includes(v) && (v !== "usage" || isAdmin) ? v : "chat";
+  $("usageTab").classList.toggle("hidden", !isAdmin);
   for (const x of VIEWS) $("v-"+x).classList.toggle("hidden", x !== view);
   for (const a of $("tabs").children) a.classList.toggle("on", a.dataset.v === view);
   if (view === "chat"){ markRead(); fitChat(); scrollChat(true); if (!isMobileLayout()) setTimeout(()=>$("chatIn").focus(), 50); }
   if (view === "me") fillMeForm();
   if (view === "squad") renderLeaderboard();
+  if (view === "usage") renderUsage();
   window.scrollTo(0,0);
 }
 window.addEventListener("hashchange", () => { if (started && me) route(); });
@@ -615,7 +678,7 @@ function attachBox(kind){
     if (st.att.vm){ prev.classList.add("hidden"); return; }
     if (st.att.vidFile){
       const v = st.att.vidFile;
-      prev.replaceChildren(h("video",{src:v.preview,muted:"",preload:"metadata",class:"prev-vid"}), h("span",{class:"note",text:"🎬 Video · " + fmtDur(v.dur) + " · " + (v.size / 1048576).toFixed(1) + " MB"}),
+      prev.replaceChildren(h("video",{src:v.preview,muted:"",preload:"metadata",class:"prev-vid"}), h("span",{class:"note",text:"🎬 Video · " + fmtDur(v.dur) + " · " + (v.size / 1048576).toFixed(1) + " MB · se șterge după 3 zile"}),
         h("button",{type:"button",class:"icon",title:"Elimină","aria-label":"Elimină atașamentul",text:"✕",onclick:()=>{ st.att = null; show(); }}));
       prev.classList.remove("hidden"); return;
     }
@@ -771,7 +834,7 @@ function dataUrlToBlobUrl(d){
 function vidPlayer(m){
   const v = h("video",{class:"att vid",controls:"",preload:"metadata",playsinline:"",src:m.vid.url});
   if (m.vid.w && m.vid.h) v.style.aspectRatio = m.vid.w + "/" + m.vid.h;
-  v.onerror = () => v.replaceWith(h("div",{class:"note",text:"(video șters)"}));
+  v.onerror = () => v.replaceWith(h("div",{class:"note",text:"(video expirat: videoclipurile se șterg după 3 zile)"}));
   return v;
 }
 async function prepVideo(file){
