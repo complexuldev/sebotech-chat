@@ -2,10 +2,14 @@
 <html lang="ro">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://api.klipy.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.klipy.com https://*.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://api.klipy.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.workers.dev https://www.gstatic.com; media-src 'self' blob:; worker-src 'self'; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.klipy.com https://*.googleusercontent.com https://*.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SeboTECH CHAT</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0f">
+<title>FolkChat</title>
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -433,6 +437,45 @@
   .dm-pick{max-height:340px;overflow-y:auto;margin-top:10px}
   .dc-head .av.sm{width:28px;height:28px;font-size:15px}
   .msgs .empty h3{margin:8px 0 4px}
+  /* ===== FolkChat: voice, calls, paging, safe areas ===== */
+  :root{--sat:var(--safe-area-inset-top, env(safe-area-inset-top, 0px));--sab:var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));--sal:var(--safe-area-inset-left, env(safe-area-inset-left, 0px));--sar:var(--safe-area-inset-right, env(safe-area-inset-right, 0px))}
+  body{padding-left:var(--sal);padding-right:var(--sar)}
+  .top{padding-top:var(--sat)}
+  .older-btn{display:block;margin:4px auto 12px}
+  .av.speaking{box-shadow:0 0 0 2px var(--panel),0 0 0 4px #3ef08a,0 0 14px rgba(62,240,138,.55);transition:box-shadow .08s}
+  .vroom .ch{gap:8px}
+  .vpeers{padding:0 6px 4px 30px}
+  .vpeer{display:flex;align-items:center;gap:7px;padding:3px 6px;border-radius:8px;font-size:13px;color:var(--muted)}
+  .vpeer .vpn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vpeer .av.xs{width:22px;height:22px;font-size:12px}
+  .vpeer .ch-edit{opacity:0}.vpeer:hover .ch-edit{opacity:1}
+  .voice-panel{border-top:1px solid var(--line);padding:10px 10px 8px;background:var(--panel2)}
+  .vp-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .vp-dot{width:9px;height:9px;border-radius:50%;background:#3ef08a;box-shadow:0 0 8px #3ef08a;flex:none}
+  .vp-ok{color:#3ef08a;font-size:13px}
+  .vp-btns{display:flex;gap:6px}
+  .vp-btns button{flex:1;padding:7px 4px;font-size:12px;border-radius:8px}
+  .vp-btns button.off{background:rgba(244,63,94,.15);border-color:rgba(244,63,94,.5)}
+  .vp-btns .hang,.callbar .hang{background:#e5484d;border-color:#e5484d;color:#fff}
+  .callbtn.off{opacity:.4}
+  .callbar{position:fixed;z-index:70;top:calc(64px + var(--sat));left:50%;transform:translateX(-50%);width:min(440px,calc(100vw - 20px));display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--panel);border:1px solid #2f6f4a;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.55)}
+  .callbar button.icon.off{background:rgba(244,63,94,.15)}
+  .incoming{position:fixed;z-index:80;top:calc(14px + var(--sat));left:50%;transform:translateX(-50%);width:min(460px,calc(100vw - 20px));display:flex;align-items:center;gap:12px;padding:14px;background:var(--panel);border:1px solid var(--accent);border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.65);animation:ringpop .25s ease-out}
+  .incoming .accept{background:#2fb36a;border-color:#2fb36a;color:#fff}
+  .incoming .decline{background:#e5484d;border-color:#e5484d;color:#fff}
+  .av.ringing{animation:ringpulse 1s infinite}
+  @keyframes ringpulse{0%{box-shadow:0 0 0 0 rgba(62,240,138,.6)}100%{box-shadow:0 0 0 14px rgba(62,240,138,0)}}
+  @keyframes ringpop{from{opacity:0;transform:translate(-50%,-10px)}to{opacity:1;transform:translate(-50%,0)}}
+  body.reduce-motion .incoming,body.reduce-motion .av.ringing{animation:none}
+  @media (max-width:760px){
+    nav.tabs{padding-bottom:calc(6px + var(--sab))}
+    .dc{height:calc(100vh - 150px - var(--sat) - var(--sab))}
+    .callbar{top:calc(58px + var(--sat))}
+    .incoming{gap:10px;padding:12px}
+    .incoming .av.lg{width:48px;height:48px;font-size:24px}
+    .incoming button{padding:9px 11px;font-size:13px}
+    .incoming .note{white-space:nowrap}
+  }
   /* mobile */
   @media (max-width:900px){
     .dc{grid-template-columns:1fr;height:calc(100vh - 150px)}
@@ -453,10 +496,10 @@
 </head>
 <body>
 
-<div id="loading" style="text-align:center"><div class="spinner"></div><div class="note" id="loadingMsg">Se încarcă SeboTECH CHAT…</div></div>
+<div id="loading" style="text-align:center"><div class="spinner"></div><div class="note" id="loadingMsg">Se încarcă FolkChat…</div></div>
 
 <div id="signin" class="gate hidden">
-  <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
+  <div class="logo"><span class="a">Folk</span><span class="b">Chat</span></div>
   <p class="note" style="text-align:center;margin:0 0 16px">Doar cu invitație. Conectează-te, apoi folosește cheia de acces.</p>
   <div class="card" style="text-align:center">
     <button class="primary" type="button" id="signInBtn" style="width:100%">Conectează-te cu Google</button>
@@ -465,7 +508,7 @@
 </div>
 
 <div id="setup" class="gate hidden">
-  <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
+  <div class="logo"><span class="a">Folk</span><span class="b">Chat</span></div>
   <div class="card">
     <div class="h2">Configurare inițială</div>
     <div id="setupBody">
@@ -477,12 +520,12 @@
 </div>
 
 <div id="gate" class="gate hidden">
-  <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
+  <div class="logo"><span class="a">Folk</span><span class="b">Chat</span></div>
   <p class="note" style="text-align:center;margin:0 0 16px">Doar cu invitație. Introdu cheia ca să-ți faci profilul.</p>
   <div class="card">
     <form id="gateForm" autocomplete="off">
       <label for="keyIn" style="margin-top:0">Cheie de acces</label>
-      <input id="keyIn" placeholder="SEBO-XXXX-XXXX-XXXX" spellcheck="false" style="text-transform:uppercase;letter-spacing:1px">
+      <input id="keyIn" placeholder="FOLK-XXXX-XXXX-XXXX" spellcheck="false" style="text-transform:uppercase;letter-spacing:1px">
       <label for="tagIn">Nume</label>
       <input id="tagIn" maxlength="24" placeholder="Cum să-ți zică ceilalți">
       <label>Iconiță</label>
@@ -496,7 +539,7 @@
 
 <div id="app" class="hidden">
   <div class="top"><div class="in">
-    <div class="logo"><span class="a">SeboTECH</span> <span class="b">CHAT</span></div>
+    <div class="logo"><span class="a">Folk</span><span class="b">Chat</span></div>
     <nav class="tabs" id="tabs">
       <a href="#chat" data-v="chat"><span class="ico">💬</span><span>Chat</span><span class="badge hidden" id="chatBadge"></span></a>
       <a href="#feed" data-v="feed"><span class="ico">📰</span><span>Postări</span></a>
@@ -514,7 +557,7 @@
     <section id="v-chat" class="view">
       <div class="dc">
         <aside class="dc-side">
-          <div class="dc-server"><span class="srv-ico">S</span><b class="grow">SeboTECH</b><button type="button" class="icon hidden" id="chAdd" title="Canal nou" aria-label="Canal nou">＋</button></div>
+          <div class="dc-server"><span class="srv-ico">F</span><b class="grow">FolkChat</b><button type="button" class="icon hidden" id="chAdd" title="Canal nou" aria-label="Canal nou">＋</button></div>
           <div class="side-scroll">
             <div class="side-h"><span class="grow">Mesaje directe</span><button type="button" class="icon" id="dmAdd" title="Mesaj privat nou" aria-label="Mesaj privat nou">＋</button></div>
             <div class="ch-list" id="dmList"></div>
@@ -522,7 +565,10 @@
               <div class="side-h"><span class="grow">Canale</span></div>
               <div class="ch-list" id="chList"></div>
             </div>
+            <div class="side-h"><span class="grow">Canale vocale</span><button type="button" class="icon hidden" id="voiceAdd" title="Canal vocal nou" aria-label="Canal vocal nou">＋</button></div>
+            <div class="ch-list" id="voiceList"></div>
           </div>
+          <div class="voice-panel hidden" id="voicePanel"></div>
           <div class="user-panel" id="userPanel"></div>
         </aside>
         <div class="dc-main">
@@ -635,6 +681,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=10"></script>
+<script type="module" src="app.js?v=11"></script>
 </body>
 </html>
