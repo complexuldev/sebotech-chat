@@ -268,14 +268,14 @@ function fitChat(){
   cancelAnimationFrame(fitRaf);
   fitRaf = requestAnimationFrame(() => {
     const dc = document.querySelector(".dc");
-    if (!dc || view !== "chat" || !isMobileLayout()){ if (dc) dc.style.height = ""; return; }
+    if (!dc || view !== "chat"){ if (dc) dc.style.height = ""; return; }
     const vv = window.visualViewport;
     const screenH = vv ? vv.height : window.innerHeight;
     const nav = $("tabs");
     const navFixed = nav && getComputedStyle(nav).position === "fixed" && getComputedStyle(nav).display !== "none";
     const navH = navFixed ? nav.getBoundingClientRect().height : 0;
     const top = dc.getBoundingClientRect().top + (vv ? vv.offsetTop : 0);
-    const h = Math.max(240, Math.floor(screenH - Math.max(0, top) - navH - 8));
+    const h = Math.max(240, Math.floor(screenH - Math.max(0, top) - navH - (isMobileLayout() ? 8 : 0)));
     dc.style.height = h + "px";
     if (document.activeElement === $("chatIn")) scrollChat(true);
   });
