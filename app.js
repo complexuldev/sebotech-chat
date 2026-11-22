@@ -994,7 +994,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeEmojiPi
 // ================= SETTINGS (stored on this device) =================
 const DEFAULT_SETTINGS = {
   theme: "dark", accent: "#8b7cff", fontSize: 15, compact: false, h24: true, reduceMotion: false, showAvatars: true,
-  sound: true, volume: 0.6, sfx: { msg: true, mention: true, dm: true, send: true, join: false, react: true },
+  sound: true, volume: 0.6, sfx: { msg: true, mention: true, dm: true, send: true, join: false, react: true, voice: true, ui: true },
   notify: false, notifyAll: false, popups: true, muted: {},
   voice: { micId: "", spkId: "", ns: "ai", echo: true, agc: true, micGain: 1, outVol: 1, gate: false, gateDb: -50,
            ptt: false, pttKey: "KeyV", pttLabel: "V", pttDelay: 200, quality: "high", shareQ: "720p30", userVol: {} }
@@ -1034,10 +1034,20 @@ const SFX = {
   dm:      { type:"sine",     notes:[[784,.07],[1047,.07],[784,.06],[1319,.12]] },
   join:    { type:"sine",     notes:[[392,.08],[587,.12]] },
   react:   { type:"sine",     notes:[[1046,.05]] },
-  test:    { type:"triangle", notes:[[659,.06],[784,.06],[988,.1]] }
+  test:    { type:"triangle", notes:[[659,.06],[784,.06],[988,.1]] },
+  vjoin:   { type:"sine",     notes:[[523,.06],[784,.1]], vol:.8 },          // someone joins your voice channel
+  vleave:  { type:"sine",     notes:[[659,.06],[440,.11]], vol:.8 },         // someone leaves it
+  mute:    { type:"triangle", notes:[[587,.04],[392,.07]], vol:.6 },
+  unmute:  { type:"triangle", notes:[[392,.04],[587,.07]], vol:.6 },
+  deafen:  { type:"triangle", notes:[[523,.04],[392,.04],[262,.08]], vol:.6 },
+  undeafen:{ type:"triangle", notes:[[262,.04],[392,.04],[523,.08]], vol:.6 },
+  share:   { type:"sine",     notes:[[523,.05],[659,.05],[1047,.1]], vol:.7 },
+  unshare: { type:"sine",     notes:[[1047,.05],[659,.05],[523,.1]], vol:.7 },
+  hangup:  { type:"sine",     notes:[[494,.09],[370,.16]], vol:.8 }
 };
+const SFX_GROUP = { vjoin: "voice", vleave: "voice", hangup: "voice", share: "voice", unshare: "voice", mute: "ui", unmute: "ui", deafen: "ui", undeafen: "ui" };
 function playSfx(name, force){
-  if (!force && (!settings.sound || !settings.sfx[name])) return;
+  if (!force && (!settings.sound || !settings.sfx[SFX_GROUP[name] || name])) return;
   const s = SFX[name]; if (!s) return;
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
@@ -1047,7 +1057,7 @@ function playSfx(name, force){
       const o = actx.createOscillator(), g = actx.createGain();
       o.type = s.type; o.frequency.setValueAtTime(f, t);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.18 * settings.volume + 0.0001, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.18 * (s.vol || 1) * settings.volume + 0.0001, t + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.08);
       o.connect(g).connect(actx.destination); o.start(t); o.stop(t + d + 0.1);
       t += d;
@@ -1410,9 +1420,14 @@ function renderMsgs(force){
     out.push(msgEl(m, grouped));
     last = m;
   }
+  // animate only messages that just arrived (not the history, not re-renders)
+  const seen = seenMsgs[curCh];
+  if (seen){ for (const el of out) if (el.dataset && el.dataset.id && !seen.has(el.dataset.id)) el.classList.add("msg-in"); }
+  seenMsgs[curCh] = new Set(list.map(m => m.id));
   box.replaceChildren(...out);
   if (stick) scrollChat(true);
 }
+var seenMsgs = {};
 // Messages made only of emoji (up to 27, like Discord) are shown big.
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|[\u{1F3FB}-\u{1F3FF}\uFE0F\u200D\u20E3#*0-9]|\s)+$/u;
 function jumboEmoji(t){
@@ -1644,7 +1659,7 @@ function openSettings(start){
         toggle("Reduce animațiile", () => settings.reduceMotion, v => settings.reduceMotion = v));
     } else if (tab === "sound"){
       const vol = h("input",{type:"range",min:"0",max:"1",step:"0.05"}); vol.value = settings.volume; vol.oninput = () => { settings.volume = +vol.value; saveSettings(); }; vol.onchange = () => playSfx("test", true);
-      const names = { msg:"Mesaj nou", mention:"Mențiune (@tu)", dm:"Mesaj privat", send:"Trimiți un mesaj", react:"Reacție", join:"Cineva intră online" };
+      const names = { msg:"Mesaj nou", mention:"Mențiune (@tu)", dm:"Mesaj privat", send:"Trimiți un mesaj", react:"Reacție", join:"Cineva intră online", voice:"Voce: intră / iese cineva, apel închis, partajare", ui:"Butoane: microfon, sunet, notificări" };
       body.replaceChildren(
         toggle("Sunete activate", () => settings.sound, v => { settings.sound = v; renderUserPanel(); }),
         h("div",{class:"h2",style:"margin-top:14px",text:"Volum"}), vol,
@@ -2328,7 +2343,7 @@ async function startShare(){
     const nat = await nativeShareAudio();
     if (nat){ s.removeTrack(sa); sa.stop(); s.addTrack(nat); sa = null; }
   }
-  share.stream = s; share.q = q;
+  share.stream = s; share.q = q; playSfx("share");
   for (const pc of sharePCs()){ shareAttach(pc); dcSend(pc, { t: "share", on: true, q }); }
   renderVoice(); if (call.pair) callUI();
   flash("🖥️ Partajezi ecranul" + (s.getAudioTracks().length ? " cu sunet." : ". (Fără sunet: bifează „Partajează sunetul” data viitoare.)"));
@@ -2360,7 +2375,7 @@ async function nativeShareAudio(){
 }
 function stopShare(){
   if (!share.stream) return;
-  const s = share.stream; share.stream = null;
+  const s = share.stream; share.stream = null; playSfx("unshare");
   if (share.native){ tInvoke("sys_audio_stop"); try { share.native.ctx.close(); } catch(e){} share.native = null; }
   for (const pc of sharePCs()){ shareAttach(pc); dcSend(pc, { t: "share", on: false }); }
   s.getTracks().forEach(t => t.stop());
@@ -2692,7 +2707,7 @@ function callUI(){
   const av = avatar(call.other,"sm"); av.dataset.vu = call.other;
   if (!bar.dataset.drag){ bar.dataset.drag = "1"; makeDraggable(bar, "fc:callbar"); }
   bar.replaceChildren(...[h("span",{class:"drag-h",title:"Trage ca să muți (dublu-click: înapoi la loc)",text:"⠿"}), av, h("div",{class:"grow",style:"min-width:0"}, h("b",{text:p.tag || "?"}), h("div",{class:"note",style:"font-size:12px",text:"📞 " + status})),
-    h("button",{type:"button",class:"icon" + (call.muted ? " off" : ""),title: call.muted ? "Pornește microfonul" : "Oprește microfonul","aria-label":"Microfon",text: call.muted ? "🔇" : "🎤",onclick:() => { call.muted = !call.muted; syncMic(); callUI(); }}),
+    h("button",{type:"button",class:"icon" + (call.muted ? " off" : ""),title: call.muted ? "Pornește microfonul" : "Oprește microfonul","aria-label":"Microfon",text: call.muted ? "🔇" : "🎤",onclick:() => { call.muted = !call.muted; playSfx(call.muted ? "mute" : "unmute"); syncMic(); callUI(); }}),
     settings.voice.ptt ? pttButton() : null,
     h("button",{type:"button",class:"icon",title:"Volumul lui " + (p.tag || "?"),"aria-label":"Volum",text:"🔉",onclick:ev => userVolPop(call.other, ev.currentTarget)}),
     shareBtn("icon"),
@@ -2828,7 +2843,7 @@ async function answer(c){
   call.unsubs.push(D.watchCall(c.id, x => { if (!x && call.pair === c.id){ cleanupCall(); flash("Apel încheiat."); } }));
   call.tick = setInterval(() => { if (call.state === "active") callUI(); }, 1000);
 }
-function hangUp(silent){ const pair = call.pair; if (!pair) return; cleanupCall(); D.endCall(pair); if (!silent) flash("Apel încheiat."); }
+function hangUp(silent){ const pair = call.pair; if (!pair) return; playSfx("hangup"); cleanupCall(); D.endCall(pair); if (!silent) flash("Apel încheiat."); }
 function cleanupCall(){
   stopRing(); clearTimeout(call.timer); clearInterval(call.tick);
   for (const u of call.unsubs) try { u(); } catch(e){}
@@ -2852,9 +2867,15 @@ function initVoice(){
     renderVoice();
   }));
 }
+let rosterSeen = new Set(), rosterRoom = null;
 function onRoster(room){
   if (voice.room === room){
     const ids = new Set((voiceRoster[room] || []).map(p => p.id));
+    if (rosterRoom === room){
+      for (const id of ids) if (!rosterSeen.has(id) && id !== uid){ playSfx("vjoin"); break; }
+      for (const id of rosterSeen) if (!ids.has(id) && id !== uid){ playSfx("vleave"); break; }
+    }
+    rosterSeen = ids; rosterRoom = room;
     for (const id of [...voice.peers.keys()]) if (!ids.has(id)) dropPeer(id);
     if (!ids.has(uid) && Date.now() - voice.joinedAt > 5000){ leaveVoice(true); flash("Ai fost deconectat de la canalul vocal."); }
   }
@@ -2936,6 +2957,7 @@ async function leaveVoice(silent){
   renderVoice();
 }
 function setVoiceFlags(muted, deaf){
+  if (deaf !== voice.deaf) playSfx(deaf ? "deafen" : "undeafen"); else if (muted !== voice.muted) playSfx(muted ? "mute" : "unmute");
   voice.muted = muted; voice.deaf = deaf;
   syncMic();
   for (const id of voice.peers.keys()){ const a = document.getElementById("ra-" + id); if (a) a.muted = deaf; }
