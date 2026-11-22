@@ -360,6 +360,43 @@ export async function endCall(pair){
 export function addCallIce(pair, cand){ return setDoc(doc(collection(db, "calls", pair, "ice")), { from: uid, c: JSON.stringify(cand), ts: serverTimestamp() }); }
 export function watchCallIce(pair, cb){ return onSnapshot(collection(db, "calls", pair, "ice"), s => cb(s.docChanges().filter(c => c.type === "added").map(c => c.doc.data())), () => {}); }
 
+// ---------- live call set-up relay (Cloudflare worker WebSocket) ----------
+// Offer/answer/ICE messages go friend-to-friend through the worker instead of being written to Firestore:
+// faster, no database writes, and nothing about the call passes through Google. If a friend isn't connected
+// to the relay (old app version, network trouble), the old Firestore path is used for them automatically.
+let hubWs = null, hubOnline = new Set(), hubWant = false, hubTimer = null, hubBackoff = 1000, hubPing = null, hubSeq = 0;
+const hubHandlers = new Set(), hubPending = new Map();
+export function hubStart(){ hubWant = true; hubOpen(); }
+export function hubStop(){ hubWant = false; clearTimeout(hubTimer); clearInterval(hubPing); if (hubWs) try { hubWs.close(1000); } catch(e){} hubWs = null; hubOnline = new Set(); }
+async function hubOpen(){
+  if (!hubWant || hubWs || !MEDIA_URL || !auth.currentUser || !("WebSocket" in window)) return;
+  let t; try { t = await auth.currentUser.getIdToken(); } catch(e){ hubRetry(); return; }
+  if (hubWs) return;
+  const ws = new WebSocket(MEDIA_URL.replace(/\/$/, "").replace(/^http/, "ws") + "/rtc?t=" + encodeURIComponent(t));
+  hubWs = ws;
+  ws.onopen = () => { hubBackoff = 1000; clearInterval(hubPing); hubPing = setInterval(() => { try { ws.send("ping"); } catch(e){} }, 45000); };
+  ws.onmessage = e => {
+    if (e.data === "pong") return;
+    let m; try { m = JSON.parse(e.data); } catch(err){ return; }
+    if (m.t === "online"){ hubOnline = new Set(m.ids || []); return; }
+    if (m.t === "nack"){ const f = hubPending.get(m.id); hubPending.delete(m.id); hubOnline.delete(m.to); if (f) f(); return; }
+    if (m.t === "sig") for (const fn of hubHandlers) try { fn(m.from, m.d); } catch(err){}
+  };
+  ws.onclose = () => { if (hubWs === ws){ hubWs = null; hubOnline = new Set(); clearInterval(hubPing); } hubRetry(); };
+  ws.onerror = () => {};
+}
+function hubRetry(){ if (!hubWant) return; clearTimeout(hubTimer); hubTimer = setTimeout(hubOpen, hubBackoff); hubBackoff = Math.min(hubBackoff * 2, 60000); }
+addEventListener("online", () => { if (hubWant && !hubWs){ hubBackoff = 1000; hubOpen(); } });
+/** Send d to friend `to` through the relay. Returns false if they can't be reached that way (use Firestore).
+ *  `fallback` runs if the relay finds them gone after all. */
+export function hubSend(to, d, fallback){
+  if (!hubWs || hubWs.readyState !== 1 || !hubOnline.has(to)) return false;
+  const id = ++hubSeq;
+  if (fallback){ hubPending.set(id, fallback); setTimeout(() => hubPending.delete(id), 15000); }
+  try { hubWs.send(JSON.stringify({ t: "sig", to, id, d })); return true; } catch(e){ hubPending.delete(id); return false; }
+}
+export function onHub(fn){ hubHandlers.add(fn); return () => hubHandlers.delete(fn); }
+
 // ---------- group voice channels ----------
 export function watchVoiceRooms(cb){ return onSnapshot(collection(db, "voice"), s => cb(rows(s)), () => {}); }
 export function createVoiceRoom(id, f){ return setDoc(doc(db, "voice", id), Object.assign({}, f, { ts: serverTimestamp() })); }
