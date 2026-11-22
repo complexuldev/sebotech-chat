@@ -696,7 +696,7 @@ const DEFAULT_SETTINGS = {
   sound: true, volume: 0.6, sfx: { msg: true, mention: true, dm: true, send: true, join: false, react: true },
   notify: false, notifyAll: false, popups: true, muted: {},
   voice: { micId: "", spkId: "", ns: "ai", echo: true, agc: true, micGain: 1, outVol: 1, gate: false, gateDb: -50,
-           ptt: false, pttKey: "KeyV", pttLabel: "V", pttDelay: 200, quality: "high", userVol: {} }
+           ptt: false, pttKey: "KeyV", pttLabel: "V", pttDelay: 200, quality: "high", shareQ: "720p30", userVol: {} }
 };
 let settings = loadSettings();
 function loadSettings(){
@@ -1670,7 +1670,8 @@ function reapplyMic(){
         let ns; try { ns = await getMic(); } catch(e){ micAlert(e); return; }
         if (!holder.stream){ ns.getTracks().forEach(t => t.stop()); return; }
         const tr = ns.getAudioTracks()[0];
-        for (const pc of pcs) for (const s of pc.getSenders()) if (s.track && s.track.kind === "audio") await s.replaceTrack(tr).catch(() => {});
+        const oldTr = holder.stream.getAudioTracks()[0];
+        for (const pc of pcs) for (const s of pc.getSenders()) if (s.track && s.track === oldTr) await s.replaceTrack(tr).catch(() => {});
         const old = holder.stream; holder.stream = ns; old.getTracks().forEach(t => t.stop());
         if (holder === voice || !voice.room) addMeter(uid, ns);
       };
@@ -1859,6 +1860,9 @@ function voiceSettings(body, toggle, redraw){
     v.ptt ? h("div",null,
       h("div",{class:"row",style:"margin-top:10px;flex-wrap:wrap;gap:10px"}, keyBtn, h("span",{class:"note",style:"font-size:12px",text:"Funcționează când FolkChat e în prim-plan. Pe telefon apare un buton."})),
       h("div",{class:"row",style:"margin-top:10px"}, h("div",{class:"note grow",text:"Întârziere la eliberare"}), dLab), dR) : null,
+    h("div",{class:"h2",style:"margin-top:18px",text:"Calitate partajare ecran"}),
+    sel(Object.entries(SHARE_Q).map(([k, q]) => [k, q.label + (k === "720p30" ? " — recomandat" : k === "1080p60" ? " — jocuri, net bun" : "")]), v.shareQ || "720p30", val => set("shareQ", val)),
+    h("div",{class:"note",style:"font-size:12px;margin-top:4px",text:"Imaginea merge direct de la tine la prieteni (nu prin server). Fiecare prieten care se uită folosește din viteza ta de upload."}),
     h("div",{class:"h2",style:"margin-top:18px",text:"Calitate audio"}),
     sel([["normal","Normală (32 kbps) — date mobile"],["high","Înaltă (64 kbps)"],["max","Maximă (128 kbps) — muzică"]], v.quality, val => set("quality", val, "q")));
 }
@@ -1894,6 +1898,145 @@ function paintSpeaking(){
   for (const el of document.querySelectorAll("[data-vu]")) el.classList.toggle("speaking", voiceSpeaking.has(el.dataset.vu));
   if (ovl.win && !ovl.win.closed) for (const el of ovl.win.document.querySelectorAll("[data-vu]")) el.classList.toggle("speaking", voiceSpeaking.has(el.dataset.vu));
 }
+// ---------- screen sharing (peer-to-peer, never touches the database) ----------
+// Every voice/call connection is created with an extra (empty) video + audio slot and a small data channel.
+// Sharing just puts the screen into those slots with replaceTrack(), so starting/stopping a share
+// needs no new handshake and no Firebase writes. The picture goes directly between the devices.
+const SHARE_Q = { "720p30": { w: 1280, h: 720, fps: 30, br: 2500000, label: "720p · 30 fps" },
+                  "1080p30": { w: 1920, h: 1080, fps: 30, br: 4500000, label: "1080p · 30 fps" },
+                  "1080p60": { w: 1920, h: 1080, fps: 60, br: 7000000, label: "1080p · 60 fps" } };
+const share = { stream: null, q: "720p30" };            // what I'm sharing
+const remoteShares = new Map();                        // peer id -> { on, video, audio, w, h }
+let stageFor = null;                                   // whose screen I'm watching
+const canShare = () => !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !isMobileLayout();
+// called right after new RTCPeerConnection(), before any offer/answer
+function sharePrep(pc, other, offerer){
+  pc.__other = other;
+  const dc = pc.createDataChannel("fc", { negotiated: true, id: 7 });
+  pc.__dc = dc;
+  dc.onopen = () => { if (share.stream) dcSend(pc, { t: "share", on: true, q: share.q }); };
+  dc.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch(x){ return; } onShareMsg(other, m); };
+  if (offerer){
+    pc.__vt = pc.addTransceiver("video", { direction: "sendrecv" });
+    pc.__at = pc.addTransceiver("audio", { direction: "sendrecv" });
+    shareAttach(pc);
+  }
+}
+// answerer: after setRemoteDescription(offer), before createAnswer()
+function shareAnswerPrep(pc){
+  const ts = pc.getTransceivers();
+  pc.__vt = ts.find(t => t.receiver.track.kind === "video");
+  pc.__at = ts.find(t => t.receiver.track.kind === "audio" && t.mid !== "0");
+  for (const t of [pc.__vt, pc.__at]) if (t) t.direction = "sendrecv";
+  shareAttach(pc);
+}
+// remote tracks: mid 0 is the microphone, the rest are screen video / screen audio
+function shareOnTrack(other, e){
+  if (e.track.kind === "audio" && e.transceiver && e.transceiver.mid === "0") return false;
+  const r = remoteShares.get(other) || { on: false };
+  if (e.track.kind === "video") r.video = e.track; else r.audio = e.track;
+  remoteShares.set(other, r);
+  if (stageFor === other) renderStage();
+  return true;
+}
+function dcSend(pc, m){ try { if (pc.__dc && pc.__dc.readyState === "open") pc.__dc.send(JSON.stringify(m)); } catch(e){} }
+function sharePCs(){ return [...voice.peers.values()].map(e => e.pc).filter(Boolean).concat(call.pc ? [call.pc] : []); }
+function shareAttach(pc){
+  const v = share.stream ? share.stream.getVideoTracks()[0] || null : null, a = share.stream ? share.stream.getAudioTracks()[0] || null : null;
+  if (pc.__vt){
+    pc.__vt.sender.replaceTrack(v).catch(() => {});
+    if (v) try { const p = pc.__vt.sender.getParameters(); if (!p.encodings || !p.encodings.length) p.encodings = [{}]; const q = SHARE_Q[share.q]; p.encodings[0].maxBitrate = q.br; p.encodings[0].maxFramerate = q.fps; p.degradationPreference = "maintain-framerate"; pc.__vt.sender.setParameters(p).catch(() => {}); } catch(e){}
+  }
+  if (pc.__at) pc.__at.sender.replaceTrack(a).catch(() => {});
+}
+function onShareMsg(from, m){
+  if (m.t !== "share") return;
+  const r = remoteShares.get(from) || {};
+  const was = r.on; r.on = !!m.on; r.q = m.q; remoteShares.set(from, r);
+  if (r.on && !was){
+    playSfx("react", true);
+    if (call.pair && call.other === from) openStage(from);
+    else flash("📺 " + ((P(from) || {}).tag || "Cineva") + " partajează ecranul. Apasă „Urmărește” în panoul vocal.");
+  }
+  if (!r.on && stageFor === from) closeStage();
+  renderVoice(); if (call.pair) callUI();
+}
+async function startShare(){
+  if (share.stream){ stopShare(); return; }
+  if (!voice.room && !call.pair){ flash("Intră într-un apel sau canal vocal ca să partajezi ecranul.", true); return; }
+  if (!canShare()){ flash("Partajarea ecranului merge doar de pe PC (Chrome, Edge sau aplicația de Windows).", true); return; }
+  const q = SHARE_Q[settings.voice.shareQ] ? settings.voice.shareQ : "720p30";
+  let s;
+  try {
+    s = await navigator.mediaDevices.getDisplayMedia({
+      video: { width: { ideal: SHARE_Q[q].w }, height: { ideal: SHARE_Q[q].h }, frameRate: { ideal: SHARE_Q[q].fps, max: SHARE_Q[q].fps } },
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      systemAudio: "include", selfBrowserSurface: "exclude", surfaceSwitching: "include"
+    });
+  } catch(e){
+    if (e && e.name !== "NotAllowedError" && e.name !== "AbortError") flash("Nu am putut porni partajarea ecranului: " + (e.message || e.name), true);
+    return;
+  }
+  const vt = s.getVideoTracks()[0];
+  if (vt){ try { vt.contentHint = q === "1080p60" ? "motion" : "detail"; } catch(e){} vt.addEventListener("ended", () => { if (share.stream === s) stopShare(); }); }
+  share.stream = s; share.q = q;
+  for (const pc of sharePCs()){ shareAttach(pc); dcSend(pc, { t: "share", on: true, q }); }
+  renderVoice(); if (call.pair) callUI();
+  flash("🖥️ Partajezi ecranul" + (s.getAudioTracks().length ? " cu sunet." : ". (Fără sunet: bifează „Partajează sunetul” data viitoare.)"));
+}
+function stopShare(){
+  if (!share.stream) return;
+  const s = share.stream; share.stream = null;
+  for (const pc of sharePCs()){ shareAttach(pc); dcSend(pc, { t: "share", on: false }); }
+  s.getTracks().forEach(t => t.stop());
+  if (stageFor === uid) closeStage();
+  renderVoice(); if (call.pair) callUI();
+}
+function shareLeft(id){ remoteShares.delete(id); if (stageFor === id) closeStage(); }
+function shareReset(){ if (share.stream) stopShare(); remoteShares.clear(); closeStage(); }
+// --- the viewer window (movable, resizable, full screen) ---
+function openStage(id){ stageFor = id; renderStage(); }
+function closeStage(){ stageFor = null; const st = $("stage"); if (st){ const v = st.querySelector("video"); if (v) v.srcObject = null; const a = st.querySelector("audio"); if (a) a.srcObject = null; st.remove(); } }
+function renderStage(){
+  if (!stageFor){ closeStage(); return; }
+  const mine = stageFor === uid, r = mine ? null : remoteShares.get(stageFor);
+  const vtrack = mine ? (share.stream && share.stream.getVideoTracks()[0]) : (r && r.video);
+  if (!vtrack){ closeStage(); return; }
+  let st = $("stage");
+  if (!st){
+    st = h("div",{id:"stage",class:"stage"});
+    document.body.append(st);
+    makeDraggable(st, "fc:stage");
+  }
+  const p = P(stageFor) || {};
+  const video = h("video",{autoplay:"",playsinline:"",muted:""}); video.muted = true;
+  video.srcObject = new MediaStream([vtrack]); video.play().catch(() => {});
+  const kids = [
+    h("div",{class:"stage-top"},
+      h("span",{class:"drag-h",text:"⠿"}),
+      h("b",{class:"grow",style:"white-space:nowrap;overflow:hidden;text-overflow:ellipsis",text:"📺 " + (mine ? "Ecranul tău (previzualizare)" : (p.tag || "?") + " partajează")}),
+      h("button",{type:"button",class:"icon",title:"Ecran complet","aria-label":"Ecran complet",text:"⛶",onclick:() => { const el = video; (el.requestFullscreen ? el.requestFullscreen() : el.webkitEnterFullscreen && el.webkitEnterFullscreen()); }}),
+      h("button",{type:"button",class:"icon",title:"Închide","aria-label":"Închide",text:"✕",onclick:closeStage})),
+    video];
+  if (!mine && r && r.audio){
+    const au = h("audio",{autoplay:""}); au.srcObject = new MediaStream([r.audio]); au.muted = !!voice.deaf;
+    au.volume = Math.min(1, settings.voice.outVol); if (settings.voice.spkId && au.setSinkId) au.setSinkId(settings.voice.spkId).catch(() => {});
+    au.play().catch(() => {}); kids.push(au);
+  }
+  st.replaceChildren(...kids);
+  video.ondblclick = () => video.requestFullscreen && video.requestFullscreen();
+}
+// buttons shown in the voice panel / call bar
+function shareButtons(){
+  const out = [];
+  for (const [id, r] of remoteShares) if (r.on && (voice.peers.has(id) || call.other === id))
+    out.push(h("button",{type:"button",class:"watch-btn" + (stageFor === id ? " on" : ""),title:"Urmărește ecranul",text:"📺 " + ((P(id) || {}).tag || "?") + (stageFor === id ? " · se vede" : " · Urmărește"),onclick:() => stageFor === id ? closeStage() : openStage(id)}));
+  return out;
+}
+function shareBtn(cls){
+  if (!canShare()) return null;
+  return h("button",{type:"button",class:(cls || "") + (share.stream ? " sharing" : ""),title: share.stream ? "Oprește partajarea ecranului" : "Partajează ecranul (" + SHARE_Q[settings.voice.shareQ || "720p30"].label + ")","aria-label":"Partajează ecranul",text: share.stream ? "⏹" : "🖥️",onclick:startShare});
+}
 // ---- drag anything around (call bar); position remembered per device ----
 function makeDraggable(el, key){
   const clamp = (x, y) => [Math.max(4, Math.min(innerWidth - el.offsetWidth - 4, x)), Math.max(4, Math.min(innerHeight - el.offsetHeight - 4, y))];
@@ -1904,6 +2047,7 @@ function makeDraggable(el, key){
   el.addEventListener("pointerdown", e => {
     if (e.button !== 0 || e.target.closest("button, input, a, .ptt-btn")) return;
     const r = el.getBoundingClientRect();
+    if (e.clientX > r.right - 20 && e.clientY > r.bottom - 20) return;   // resize corner
     start = { dx: e.clientX - r.left, dy: e.clientY - r.top, id: e.pointerId, moved: false, x0: e.clientX, y0: e.clientY };
     try { el.setPointerCapture(e.pointerId); } catch(x){}
   });
@@ -2052,6 +2196,8 @@ function callUI(){
     h("button",{type:"button",class:"icon" + (call.muted ? " off" : ""),title: call.muted ? "Pornește microfonul" : "Oprește microfonul","aria-label":"Microfon",text: call.muted ? "🔇" : "🎤",onclick:() => { call.muted = !call.muted; syncMic(); callUI(); }}),
     settings.voice.ptt ? pttButton() : null,
     h("button",{type:"button",class:"icon",title:"Volumul lui " + (p.tag || "?"),"aria-label":"Volum",text:"🔉",onclick:ev => userVolPop(call.other, ev.currentTarget)}),
+    shareBtn("icon"),
+    ...shareButtons(),
     h("button",{type:"button",class:"icon" + (overlayOpen() ? " on" : ""),title:"Overlay peste joc (fereastră mică mereu deasupra)","aria-label":"Overlay",text:"🪟",onclick:toggleOverlay}),
     h("button",{type:"button",class:"hang",title:"Închide","aria-label":"Închide apelul",text:"Închide",onclick:() => hangUp()})].filter(Boolean));
   paintSpeaking(); renderChatHeader(); renderOverlay();
@@ -2060,8 +2206,9 @@ function newCallPC(){
   const pc = new RTCPeerConnection(RTC_CFG);
   call.stream.getTracks().forEach(t => pc.addTrack(t, call.stream));
   tunePC(pc);
+  sharePrep(pc, call.other, call.role === "caller");
   pc.onicecandidate = e => { if (e.candidate && call.pair) D.addCallIce(call.pair, e.candidate.toJSON()).catch(() => {}); };
-  pc.ontrack = e => { call.audio = playRemote(call.other, e.streams[0] || new MediaStream([e.track]), false); };
+  pc.ontrack = e => { if (shareOnTrack(call.other, e)) return; call.audio = playRemote(call.other, e.streams[0] || new MediaStream([e.track]), false); };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "connected" && call.state !== "active"){ call.state = "active"; call.started = Date.now(); stopRing(); callUI(); }
     if (pc.connectionState === "connected" && !call.started){ call.started = Date.now(); }
@@ -2141,6 +2288,7 @@ async function answer(c){
   try {
     call.pc = newCallPC();
     await call.pc.setRemoteDescription(c.offer);
+    shareAnswerPrep(call.pc);
     const ans = await call.pc.createAnswer(); await call.pc.setLocalDescription(ans);
     await D.answerCall(c.id, ans);
     await flushIce();
@@ -2156,8 +2304,8 @@ function cleanupCall(){
   for (const u of call.unsubs) try { u(); } catch(e){}
   if (call.pc) try { call.pc.close(); } catch(e){}
   if (call.stream) call.stream.getTracks().forEach(t => t.stop());
-  if (call.other) stopRemote(call.other);
-  if (!voice.room) removeMeter(uid);
+  if (call.other){ stopRemote(call.other); shareLeft(call.other); }
+  if (!voice.room){ removeMeter(uid); if (share.stream) stopShare(); }
   Object.assign(call, { pair: null, other: null, pc: null, stream: null, audio: null, role: null, state: null, unsubs: [], timer: null, tick: null, started: 0, iceQ: [] });
   presenceSet(!document.hidden);
   callUI();
@@ -2188,15 +2336,16 @@ function vpc(other, initiator){
   voice.peers.set(other, entry);
   voice.stream.getTracks().forEach(t => pc.addTrack(t, voice.stream));
   tunePC(pc);
+  sharePrep(pc, other, initiator);
   pc.onicecandidate = e => { if (e.candidate && voice.room === room) D.sendVoiceSig(room, other, "ice", e.candidate.toJSON()).catch(() => {}); };
-  pc.ontrack = e => playRemote(other, e.streams[0] || new MediaStream([e.track]), voice.deaf);
+  pc.ontrack = e => { if (shareOnTrack(other, e)) return; playRemote(other, e.streams[0] || new MediaStream([e.track]), voice.deaf); };
   pc.onconnectionstatechange = () => { if (pc.connectionState === "failed" || pc.connectionState === "closed") stopRemote(other); };
   if (initiator) (async () => {
     try { const o = await pc.createOffer(); await pc.setLocalDescription(o); await D.sendVoiceSig(room, other, "offer", { type: o.type, sdp: o.sdp }); } catch(e){}
   })();
   return entry;
 }
-function dropPeer(id){ const e = voice.peers.get(id); if (e){ try { e.pc.close(); } catch(x){} voice.peers.delete(id); } stopRemote(id); }
+function dropPeer(id){ const e = voice.peers.get(id); if (e){ try { e.pc.close(); } catch(x){} voice.peers.delete(id); } stopRemote(id); shareLeft(id); }
 async function onSig(msgs){
   for (const s of msgs){
     D.delRef(s.ref);
@@ -2210,6 +2359,7 @@ async function onSig(msgs){
         if (e) dropPeer(s.from);
         e = vpc(s.from, false);
         await e.pc.setRemoteDescription(data);
+        shareAnswerPrep(e.pc);
         const a = await e.pc.createAnswer(); await e.pc.setLocalDescription(a);
         await D.sendVoiceSig(voice.room, s.from, "answer", { type: a.type, sdp: a.sdp });
         for (const c of e.iceQ.splice(0)) await e.pc.addIceCandidate(c).catch(() => {});
@@ -2248,6 +2398,7 @@ async function leaveVoice(silent){
   voice.unsubs = [];
   if (voice.stream) voice.stream.getTracks().forEach(t => t.stop());
   removeMeter(uid);
+  if (!call.pair) shareReset();
   voice.room = null; voice.stream = null;
   D.leaveVoicePeer(room).catch(() => {}); D.clearMySigs(room);
   presenceSet(!document.hidden);
@@ -2258,6 +2409,7 @@ function setVoiceFlags(muted, deaf){
   voice.muted = muted; voice.deaf = deaf;
   syncMic();
   for (const id of voice.peers.keys()){ const a = document.getElementById("ra-" + id); if (a) a.muted = deaf; }
+  { const sa = document.querySelector("#stage audio"); if (sa) sa.muted = deaf; }
   if (voice.room) D.setVoicePeer(voice.room, muted, deaf).catch(() => {});
   renderVoice();
 }
@@ -2309,10 +2461,13 @@ function renderVoice(){
     h("div",{class:"vp-btns"},
       h("button",{type:"button",class:voice.muted ? "off" : "",title:"Microfon",text:(voice.muted ? "🔇" : "🎤") + " Microfon",onclick:() => setVoiceFlags(!voice.muted, voice.deaf)}),
       h("button",{type:"button",class:voice.deaf ? "off" : "",title:"Sunet",text:(voice.deaf ? "🙉" : "🎧") + " Sunet",onclick:() => setVoiceFlags(voice.muted, !voice.deaf)}),
+      shareBtn("vp-gear"),
       h("button",{type:"button",class:"vp-gear" + (overlayOpen() ? " on" : ""),title:"Overlay peste joc (fereastră mică mereu deasupra)","aria-label":"Overlay",text:"🪟",onclick:toggleOverlay}),
       h("button",{type:"button",class:"vp-gear",title:"Setări voce","aria-label":"Setări voce",text:"⚙",onclick:() => openSettings("voice")}),
       h("button",{type:"button",class:"hang",title:"Deconectare",text:"Deconectare",onclick:() => leaveVoice()})),
     settings.voice.ptt ? h("div",{class:"vp-btns",style:"margin-top:6px"}, pttButton()) : null,
+    share.stream ? h("div",{class:"share-on",title:"Vezi ce partajezi",onclick:() => stageFor === uid ? closeStage() : openStage(uid)}, h("span",{class:"vp-dot"}), h("span",{class:"grow",text:"🖥️ Partajezi ecranul · " + SHARE_Q[share.q].label}), h("span",{class:"note",text: stageFor === uid ? "ascunde" : "vezi"})) : null,
+    ...(w => w.length ? [h("div",{class:"watch-row"}, w)] : [])(shareButtons()),
     h("div",{class:"note",style:"font-size:11.5px;margin-top:6px",text:"🎛️ " + nsLabel()})].filter(Boolean));
   paintSpeaking(); renderOverlay();
 }
