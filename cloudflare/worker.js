@@ -345,7 +345,7 @@ async function fsUsage(env, fresh) {
     u.searchParams.set("aggregation.perSeriesAligner", "ALIGN_SUM");
     u.searchParams.set("aggregation.crossSeriesReducer", "REDUCE_SUM");
     const r = await fetch(u, { headers: { Authorization: "Bearer " + tok } });
-    if (!r.ok) throw fail(r.status === 403 ? 403 : 502, r.status === 403 ? "missing Monitoring Viewer role" : "monitoring " + r.status);
+    if (!r.ok) { const why = clip(await r.text().catch(() => ""), 300); throw fail(r.status === 403 ? 403 : 502, (r.status === 403 ? "missing Monitoring Viewer role" : "monitoring " + r.status) + (why ? " | " + why : "")); }
     const j = await r.json(); let t = 0;
     for (const ts of j.timeSeries || []) for (const pt of ts.points || []) t += Number(pt.value.int64Value || pt.value.doubleValue || 0);
     return t;
