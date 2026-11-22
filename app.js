@@ -266,18 +266,33 @@ window.addEventListener("hashchange", () => { if (started && me) route(); });
 // ---------- mobile layout: fit the chat to the REAL screen (Android WebView, font scaling, keyboard) ----------
 const isMobileLayout = () => window.matchMedia("(max-width: 900px)").matches;
 let fitRaf = 0;
+// Android app: on some phones the system already keeps the page clear of the status / gesture bars,
+// so adding the safe-area padding again leaves a thick empty band. Detect that and drop the extra padding.
+function fixInsets(){
+  if (!D.isNative) return;
+  const a = document.activeElement; if (a && a.matches && a.matches("textarea, input")) return;   // keyboard open: sizes are off
+  const cs = getComputedStyle(document.documentElement), px = v => parseFloat(cs.getPropertyValue(v)) || 0;
+  const t = px("--safe-area-inset-top"), b = px("--safe-area-inset-bottom");
+  if (!t && !b) return;
+  const already = (screen.height - window.innerHeight) >= t + b - 4;
+  const r = document.documentElement.style;
+  if (already){ r.setProperty("--sat", "0px"); r.setProperty("--sab", "0px"); } else { r.removeProperty("--sat"); r.removeProperty("--sab"); }
+  fitChat();
+}
+for (const ms of [0, 400, 1500, 4000]) setTimeout(fixInsets, ms);
+window.addEventListener("orientationchange", () => setTimeout(fixInsets, 400));
 function fitChat(){
   cancelAnimationFrame(fitRaf);
   fitRaf = requestAnimationFrame(() => {
     const dc = document.querySelector(".dc");
     if (!dc || view !== "chat"){ if (dc) dc.style.height = ""; return; }
     const vv = window.visualViewport;
-    const screenH = vv ? vv.height : window.innerHeight;
     const nav = $("tabs");
     const navFixed = nav && getComputedStyle(nav).position === "fixed" && getComputedStyle(nav).display !== "none";
-    const navH = navFixed ? nav.getBoundingClientRect().height : 0;
-    const top = dc.getBoundingClientRect().top + (vv ? vv.offsetTop : 0);
-    const h = Math.max(240, Math.floor(screenH - Math.max(0, top) - navH - (isMobileLayout() ? 8 : 0)));
+    // bottom edge we must stay above: the tab bar if it's showing, otherwise the visible screen (keyboard top)
+    const limit = navFixed ? nav.getBoundingClientRect().top : (vv ? vv.height + vv.offsetTop : window.innerHeight);
+    const top = Math.max(0, dc.getBoundingClientRect().top);
+    const h = Math.max(200, Math.floor(limit - top - (isMobileLayout() ? 4 : 0)));
     dc.style.height = h + "px";
     if (document.activeElement === $("chatIn")) scrollChat(true);
   });
