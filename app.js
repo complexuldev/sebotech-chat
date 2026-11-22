@@ -2281,7 +2281,9 @@ async function startShare(){
   try {
     s = await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: SHARE_Q[q].w }, height: { ideal: SHARE_Q[q].h }, frameRate: { ideal: SHARE_Q[q].fps, max: SHARE_Q[q].fps } },
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      audio: Object.assign({ echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        // keep the call itself (friends' voices) out of shared system audio, otherwise they hear themselves
+        (navigator.mediaDevices.getSupportedConstraints && navigator.mediaDevices.getSupportedConstraints().restrictOwnAudio) ? { restrictOwnAudio: true, suppressLocalAudioPlayback: false } : {}),
       systemAudio: "include", selfBrowserSurface: "exclude", surfaceSwitching: "include"
     });
   } catch(e){
