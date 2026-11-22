@@ -189,7 +189,7 @@ function startApp(){
     const wasAdmin = isAdmin; isAdmin = me.role === "admin";
     if ($("app").classList.contains("hidden")){ showScreen("app"); route(); }
     initPush();
-    if (isAdmin && !wasAdmin) startAdmin();
+    if (isAdmin && !adminStarted) startAdmin();
     $("keysCard").classList.toggle("hidden", !isAdmin);
     renderAll();
   }, e => { clearTimeout(bootTimer); $("loadingMsg").textContent = "Nu s-a putut încărca (" + D.errCode(e) + ")."; }));
@@ -225,7 +225,9 @@ function saveProfileCache(){
     try { const slim = {}; for (const k in profiles) slim[k] = Object.assign({}, profiles[k], { avatar: "" }); localStorage.setItem("fc:profiles:" + uid, JSON.stringify(slim)); } catch(e2){}
   }
 }
+let adminStarted = false;
 function startAdmin(){
+  adminStarted = true;
   setTimeout(() => D.pruneChannels(channels.map(c => c.id), 30).catch(()=>{}), 8000);
   unsubs.push(D.watchKeys(list => { keys = list; renderKeys(); }));
 }
