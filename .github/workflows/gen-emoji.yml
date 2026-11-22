@@ -1,0 +1,43 @@
+# Builds vendor/emoji.js (the full emoji list for the emoji picker) from the npm packages
+# unicode-emoji-json + emojilib and commits it. Run by hand: Actions → "Build emoji list" → Run workflow.
+name: Build emoji list
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate vendor/emoji.js
+        run: |
+          mkdir -p /tmp/e && cd /tmp/e
+          npm pack unicode-emoji-json@0.9.0 emojilib@4.0.3
+          mkdir u l && tar xzf unicode-emoji-json-0.9.0.tgz -C u && tar xzf emojilib-4.0.3.tgz -C l
+          cd "$GITHUB_WORKSPACE"
+          python3 - <<'PY'
+          import json
+          d = json.load(open('/tmp/e/u/package/data-by-group.json'))
+          kw = json.load(open('/tmp/e/l/package/dist/emoji-en-US.json'))
+          RO = {'smileys_emotion':['Fețe','😀'],'people_body':['Oameni','👋'],'animals_nature':['Natură','🐶'],'food_drink':['Mâncare','🍔'],'travel_places':['Călătorii','✈️'],'activities':['Activități','⚽'],'objects':['Obiecte','💡'],'symbols':['Simboluri','❤️'],'flags':['Steaguri','🏁']}
+          out = []
+          for g in d:
+              if g['slug'] == 'component': continue
+              rows = []
+              for e in g['emojis']:
+                  if float(e['emoji_version']) > 15.0: continue
+                  k = [x.replace('_',' ') for x in kw.get(e['emoji'], []) if x.replace('_',' ') != e['name']][:6]
+                  rows.append('\t'.join([e['emoji'], e['name'], ' '.join(k), '1' if e['skin_tone_support'] else '']))
+              out.append([g['slug'], RO[g['slug']][0], RO[g['slug']][1], '\n'.join(rows)])
+          open('vendor/emoji.js', 'w').write('// Unicode emoji list (unicode-emoji-json + emojilib keywords, MIT). Each line: emoji<TAB>name<TAB>keywords<TAB>1 if it takes skin tones.\nexport const GROUPS = ' + json.dumps(out, ensure_ascii=False) + ';\n')
+          print(sum(len(g[3].split('\n')) for g in out), 'emoji')
+          PY
+          sha256sum vendor/emoji.js
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add vendor/emoji.js
+          git diff --cached --quiet && echo "no change" || (git commit -m "Build emoji list for the emoji picker" && git push)
