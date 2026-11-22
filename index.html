@@ -2,7 +2,7 @@
 <html lang="ro">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://api.klipy.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.workers.dev https://www.gstatic.com; media-src 'self' blob:; worker-src 'self'; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.klipy.com https://*.googleusercontent.com https://*.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://api.klipy.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.workers.dev https://www.gstatic.com; media-src 'self' blob:; worker-src 'self'; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.klipy.com https://*.googleusercontent.com https://*.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0b0b0f">
@@ -456,6 +456,23 @@
   .vp-btns{display:flex;gap:6px}
   .vp-btns button{flex:1;padding:7px 4px;font-size:12px;border-radius:8px}
   .vp-btns button.off{background:rgba(244,63,94,.15);border-color:rgba(244,63,94,.5)}
+  .vp-btns button.vp-gear{flex:none;width:34px}
+  .ptt-btn{flex:1;padding:9px 6px;font-size:12.5px;border-radius:8px;touch-action:none;user-select:none;-webkit-user-select:none}
+  .ptt-btn.on{background:rgba(74,222,128,.2) !important;border-color:#4ade80 !important;color:#4ade80}
+  .seg{display:flex;flex-wrap:wrap;gap:6px}
+  .seg button{flex:1 1 auto;padding:8px 10px;font-size:13px;border-radius:9px}
+  .seg button.on{background:var(--accent) !important;border-color:var(--accent) !important;color:#fff}
+  .seg button[disabled]{opacity:.4;cursor:not-allowed}
+  .vu{position:relative;height:10px;border-radius:999px;background:var(--panel3);margin-top:10px;overflow:hidden}
+  .vu-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:#f59e0b;transition:width .05s linear}
+  .vu-fill.open{background:#4ade80}
+  .vu-mark{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--text);opacity:.7}
+  .inline-cb{display:inline-flex;align-items:center;gap:6px;margin:0;font-size:13px;text-transform:none;letter-spacing:0;color:var(--muted);cursor:pointer}
+  .inline-cb input{width:auto}
+  .vpeer{cursor:pointer;border-radius:6px}
+  .vpeer:hover{background:var(--panel3)}
+  .uv-pop{position:fixed;z-index:90;width:230px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+  .uv-pop input[type=range]{width:100%;margin-top:8px;padding:0}
   .vp-btns .hang,.callbar .hang{background:#e5484d;border-color:#e5484d;color:#fff}
   .callbtn.off{opacity:.4}
   .callbar{position:fixed;z-index:70;top:calc(64px + var(--sat));left:50%;transform:translateX(-50%);width:min(440px,calc(100vw - 20px));display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--panel);border:1px solid #2f6f4a;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.55)}
@@ -689,6 +706,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=12"></script>
+<script type="module" src="app.js?v=13"></script>
 </body>
 </html>
