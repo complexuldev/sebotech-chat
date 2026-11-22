@@ -1,0 +1,96 @@
+# Builds the FolkChat Windows app (.msi installer + standalone .exe) with Pake.
+# Runs on every push to main, or by hand: Actions → "Build FolkChat for Windows" → Run workflow.
+name: Build FolkChat for Windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write          # needed to publish the GitHub Release
+
+concurrency:
+  group: build-exe
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      APP_URL: https://complexuldev.github.io/sebotech-chat/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: pake-cargo-${{ runner.os }}-v1
+
+      - name: Install Pake
+        run: npm install -g pake-cli@3
+
+      - name: Build FolkChat with Pake
+        shell: pwsh
+        run: |
+          $version = "1.0.${{ github.run_number }}"
+          # --show-system-tray + --hide-on-close: the X button hides FolkChat next to the clock,
+          #   so it keeps ringing for calls and showing message alerts.
+          # --new-window: lets the Google sign-in popup open inside the app.
+          # --safe-domain: Google / Firebase sign-in pages stay inside the app window.
+          pake "$env:APP_URL" `
+            --name FolkChat `
+            --icon desktop/icon.ico `
+            --width 1200 --height 800 `
+            --min-width 420 --min-height 560 `
+            --show-system-tray `
+            --system-tray-icon desktop/icon.png `
+            --hide-on-close `
+            --new-window `
+            --safe-domain "complexuldev.github.io,sebotech-chat.firebaseapp.com,accounts.google.com,apis.google.com" `
+            --enable-drag-drop `
+            --app-version $version `
+            --targets x64 `
+            --keep-binary
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Get-ChildItem -Recurse -Include *.msi,*.exe -File |
+            Where-Object { $_.FullName -notmatch '\\node_modules\\|\\target\\release\\build\\|\\deps\\|\\dist\\' } |
+            ForEach-Object { Write-Host "found $($_.FullName)"; Copy-Item $_.FullName -Destination dist -Force }
+          Get-ChildItem dist | Format-Table Name, Length
+          if (-not (Get-ChildItem dist -Filter *.msi) -and -not (Get-ChildItem dist -Filter *.exe)) { throw "Pake produced no installer" }
+          # friendly, stable file names
+          $msi = Get-ChildItem dist -Filter *.msi | Select-Object -First 1
+          if ($msi) { Rename-Item $msi.FullName "FolkChat-Setup.msi" }
+          $exe = Get-ChildItem dist -Filter *.exe | Sort-Object Length -Descending | Select-Object -First 1
+          if ($exe) { Rename-Item $exe.FullName "FolkChat.exe" }
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FolkChat-Windows
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-v1.0.${{ github.run_number }}
+          name: FolkChat for Windows 1.0.${{ github.run_number }}
+          body: |
+            **Download `FolkChat-Setup.msi`**, open it and follow the installer. (Or use `FolkChat.exe` without installing.)
+            Windows may show "Windows protected your PC" because the app isn't code-signed: click **More info → Run anyway**.
+            Closing the window keeps FolkChat running next to the clock so calls and messages still ring — right-click the tray icon to quit.
+          files: dist/*
+          make_latest: true

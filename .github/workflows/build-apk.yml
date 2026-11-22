@@ -1,0 +1,115 @@
+# Builds the FolkChat Android app (FolkChat.apk) with Capacitor – no Android Studio needed.
+# Runs on every push to main, or by hand: Actions → "Build FolkChat for Android" → Run workflow.
+#
+# Needs these repository secrets (Settings → Secrets and variables → Actions):
+#   GOOGLE_SERVICES_JSON        the full text of google-services.json (Firebase → Android app com.folkchat.app)
+#   ANDROID_KEYSTORE_BASE64     the signing key, base64 (keeps the same SHA-1 so Google sign-in keeps working)
+#   ANDROID_KEYSTORE_PASSWORD   its password
+name: Build FolkChat for Android
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write          # needed to publish the GitHub Release
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      HAS_GS: ${{ secrets.GOOGLE_SERVICES_JSON != '' }}
+      HAS_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check setup
+        run: |
+          if [ "$HAS_GS" != "true" ]; then
+            echo "::warning title=FolkChat Android::Add the GOOGLE_SERVICES_JSON secret first (see the checklist). Skipping the Android build."
+          fi
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::warning title=FolkChat Android::No ANDROID_KEYSTORE_BASE64 secret – building a debug APK whose key changes every run, so Google sign-in will NOT work."
+          fi
+
+      - uses: actions/setup-java@v4
+        if: env.HAS_GS == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: actions/setup-node@v4
+        if: env.HAS_GS == 'true'
+        with:
+          node-version: 22
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: env.HAS_GS == 'true'
+
+      - name: Install Capacitor
+        if: env.HAS_GS == 'true'
+        run: npm install --no-audit --no-fund
+
+      - name: Create Android project
+        if: env.HAS_GS == 'true'
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          npx cap add android
+          node scripts/patch-android.mjs
+          printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+          node -e "const j=require('./android/app/google-services.json'); if(!j.client.some(c=>c.client_info.android_client_info.package_name==='com.folkchat.app')) { console.error('google-services.json has no Android app com.folkchat.app'); process.exit(1); }"
+          npx capacitor-assets generate --android --iconBackgroundColor '#101016' --splashBackgroundColor '#0b0b0f'
+          npx cap sync android
+
+      - name: Build APK
+        if: env.HAS_GS == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          FOLKCHAT_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          FOLKCHAT_VERSION_CODE: ${{ github.run_number }}
+          FOLKCHAT_VERSION_NAME: 1.0.${{ github.run_number }}
+        run: |
+          cd android
+          chmod +x gradlew
+          mkdir -p ../dist
+          if [ "$HAS_KEY" = "true" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/folkchat.p12"
+            export FOLKCHAT_KEYSTORE="$RUNNER_TEMP/folkchat.p12"
+            ./gradlew --no-daemon assembleRelease
+            cp app/build/outputs/apk/release/app-release.apk ../dist/FolkChat.apk
+            rm -f "$RUNNER_TEMP/folkchat.p12"
+          else
+            ./gradlew --no-daemon assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk ../dist/FolkChat.apk
+          fi
+          ls -la ../dist
+
+      - name: Upload build artifact
+        if: env.HAS_GS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FolkChat-Android
+          path: mobile/dist/FolkChat.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: env.HAS_GS == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v1.0.${{ github.run_number }}
+          name: FolkChat for Android 1.0.${{ github.run_number }}
+          body: |
+            **Download `FolkChat.apk` on your phone** and open it. Android will ask to allow installing apps from your browser/files app – allow it once.
+            Updates: install the newer APK over the old one (same signing key, your login stays).
+          files: mobile/dist/FolkChat.apk
+          make_latest: false
