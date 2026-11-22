@@ -274,7 +274,17 @@ export async function deleteReply(postId, id){
 // ---------- presence ----------
 export function watchPresence(cb){ return onSnapshot(collection(db, "presence"), s => cb(rows(s)), () => {}); }
 // Written only when the status really changes (open / closed / joined a voice channel).
-export function setPresence(online, voice){ return setDoc(doc(db, "presence", uid), { seen: serverTimestamp(), online: !!online, voice: String(voice || "").slice(0, 64) }); }
+export function setPresence(online, voice, act){
+  const d = { seen: serverTimestamp(), online: !!online, voice: String(voice || "").slice(0, 64) };
+  if (act && act.n) d.act = { n: String(act.n).slice(0, 48), k: act.k, e: String(act.e || "").slice(0, 8), s: Math.floor(act.s) };
+  return setDoc(doc(db, "presence", uid), d);
+}
+// ---------- hours played (one small doc per member: playtime/{uid}.g.<game> = { n, sec, last }) ----------
+export function addPlaytime(key, name, sec){
+  sec = Math.round(sec); if (!key || sec <= 0) return Promise.resolve();
+  return setDoc(doc(db, "playtime", uid), { g: { [key]: { n: String(name).slice(0, 48), sec: increment(Math.min(sec, 900)), last: Date.now() } } }, { merge: true });
+}
+export async function getPlaytime(id){ const s = await getDoc(doc(db, "playtime", id)); return s.exists() ? (s.data().g || {}) : {}; }
 
 // ---------- push tokens (private doc, max 10 devices) ----------
 // Web fallback (browsers): Firebase Cloud Messaging with the service worker in firebase-messaging-sw.js.
