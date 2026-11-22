@@ -502,11 +502,13 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeGifPick
 const DEFAULT_SETTINGS = {
   theme: "dark", accent: "#8b7cff", fontSize: 15, compact: false, h24: true, reduceMotion: false, showAvatars: true,
   sound: true, volume: 0.6, sfx: { msg: true, mention: true, dm: true, send: true, join: false, react: true },
-  notify: false, notifyAll: false, muted: {}
+  notify: false, notifyAll: false, muted: {},
+  voice: { micId: "", spkId: "", ns: "ai", echo: true, agc: true, micGain: 1, outVol: 1, gate: false, gateDb: -50,
+           ptt: false, pttKey: "KeyV", pttLabel: "V", pttDelay: 200, quality: "high", userVol: {} }
 };
 let settings = loadSettings();
 function loadSettings(){
-  try { const s = JSON.parse(localStorage.getItem("sebo:settings") || "{}"); return Object.assign({}, DEFAULT_SETTINGS, s, { sfx: Object.assign({}, DEFAULT_SETTINGS.sfx, s.sfx || {}), muted: Object.assign({}, s.muted || {}) }); }
+  try { const s = JSON.parse(localStorage.getItem("sebo:settings") || "{}"); return Object.assign({}, DEFAULT_SETTINGS, s, { sfx: Object.assign({}, DEFAULT_SETTINGS.sfx, s.sfx || {}), muted: Object.assign({}, s.muted || {}), voice: Object.assign({}, DEFAULT_SETTINGS.voice, s.voice || {}, { userVol: Object.assign({}, (s.voice || {}).userVol || {}) }) }); }
   catch(e){ return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)); }
 }
 function saveSettings(){ try { localStorage.setItem("sebo:settings", JSON.stringify(settings)); } catch(e){} applySettings(); }
@@ -1034,13 +1036,14 @@ function channelModal(c){
 function openModal(node){ openId = null; $("overlay").replaceChildren(node); $("overlay").classList.remove("hidden"); }
 
 // ---------- settings modal ----------
-function openSettings(){
-  const tabs = [["look","🎨 Aspect"],["sound","🔊 Sunete"],["notif","🔔 Notificări"]];
-  let tab = "look";
+function openSettings(start){
+  const tabs = [["look","🎨 Aspect"],["sound","🔊 Sunete"],["voice","🎙️ Voce"],["notif","🔔 Notificări"]];
+  let tab = typeof start === "string" ? start : "look";
   const body = h("div",{class:"set-body"});
   const nav = h("div",{class:"set-nav"});
   const toggle = (label, get, set, hint) => { const cb = h("input",{type:"checkbox"}); cb.checked = !!get(); cb.onchange = () => { set(cb.checked); saveSettings(); }; return h("label",{class:"set-row"}, h("div",{class:"grow"}, h("div",{text:label}), hint ? h("div",{class:"note",text:hint}) : null), cb); };
   function draw(){
+    stopMicTest();
     nav.replaceChildren(...tabs.map(([k,l]) => h("button",{type:"button",class:k === tab ? "on" : "",text:l,onclick:() => { tab = k; draw(); }})));
     if (tab === "look"){
       body.replaceChildren(
@@ -1064,6 +1067,8 @@ function openSettings(){
         h("div",{class:"h2",style:"margin-top:14px",text:"Volum"}), vol,
         h("div",{class:"h2",style:"margin-top:18px",text:"Efecte"}),
         ...Object.keys(names).map(k => h("div",{class:"row"}, toggle(names[k], () => settings.sfx[k], v => settings.sfx[k] = v), h("button",{type:"button",class:"tiny",text:"▶",title:"Ascultă","aria-label":"Ascultă " + names[k],onclick:() => playSfx(k, true)}))));
+    } else if (tab === "voice"){
+      voiceSettings(body, toggle, draw);
     } else {
       const can = "Notification" in window;
       body.replaceChildren(
@@ -1301,10 +1306,286 @@ function micErr(e){
     : "Microfonul nu merge aici (" + (n || "eroare necunoscută") + ").";
   return new Error(msg);
 }
-async function getMic(){
+// ---- microphone pipeline: device → rumble filter → noise removal (browser / AI) → volume → noise gate → peers ----
+const FX = { ctx: null, mods: {}, bins: {} };
+const WNS = "./vendor/wns/";
+const fxSupported = () => !!(window.AudioContext && window.AudioWorkletNode && window.WebAssembly);
+async function fxCtx(){
+  if (!FX.ctx || FX.ctx.state === "closed"){ try { FX.ctx = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" }); } catch(e){ FX.ctx = new AudioContext(); } FX.mods = {}; }
+  if (FX.ctx.state === "suspended") await FX.ctx.resume().catch(() => {});
+  return FX.ctx;
+}
+function fxModule(ctx, url){
+  if (!FX.mods[url]){ FX.mods[url] = ctx.audioWorklet.addModule(url); FX.mods[url].catch(() => { delete FX.mods[url]; }); }
+  return FX.mods[url];
+}
+const SIMD = (() => { try { return WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])); } catch(e){ return false; } })();
+async function fxWasm(kind){
+  const file = kind === "gtcrn" ? "gtcrn.wasm" : SIMD ? "rnnoise_simd.wasm" : "rnnoise.wasm";
+  if (!FX.bins[file]){
+    FX.bins[file] = fetch(WNS + file).then(r => { if (!r.ok) throw new Error("wasm " + r.status); return r.arrayBuffer(); });
+    FX.bins[file].catch(() => { delete FX.bins[file]; });
+  }
+  return (await FX.bins[file]).slice(0);
+}
+function nsLabel(){
+  const v = settings.voice;
+  return ({ off: "Fără anulare zgomot", std: "Anulare zgomot standard", ai: "Izolare voce AI", lite: "Izolare voce AI ușoară" })[v.ns] + (v.gate ? " · noise gate" : "") + (v.ptt ? " · push-to-talk (" + v.pttLabel + ")" : "");
+}
+async function rawMic(){
+  const v = settings.voice;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw micErr({ name: "NotSupportedError" });
-  try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
-  catch(e){ throw micErr(e); }
+  const sup = navigator.mediaDevices.getSupportedConstraints ? navigator.mediaDevices.getSupportedConstraints() : {};
+  const a = { echoCancellation: !!v.echo, noiseSuppression: v.ns === "std", autoGainControl: !!v.agc, channelCount: 1 };
+  if (sup.voiceIsolation) a.voiceIsolation = v.ns === "std";
+  if (v.micId) a.deviceId = { ideal: v.micId };
+  try { return await navigator.mediaDevices.getUserMedia({ audio: a, video: false }); }
+  catch(e){
+    if (v.micId && (e.name === "NotFoundError" || e.name === "OverconstrainedError")){ v.micId = ""; saveSettings(); return rawMic(); }
+    throw micErr(e);
+  }
+}
+async function getMic(){
+  const raw = await rawMic();
+  const v = settings.voice;
+  if (!fxSupported()) return raw;
+  try {
+    const ctx = await fxCtx();
+    const src = ctx.createMediaStreamSource(raw);
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 80; hp.Q.value = 0.7;
+    const nodes = [src, hp];
+    let ns = null;
+    if (v.ns === "ai" || v.ns === "lite"){
+      const kind = v.ns === "lite" ? "rnnoise" : "gtcrn";
+      try {
+        const [bin] = await Promise.all([fxWasm(kind), fxModule(ctx, WNS + kind + "/workletProcessor.js")]);
+        ns = new AudioWorkletNode(ctx, "@sapphi-red/web-noise-suppressor/" + kind, { channelCount: 1, channelCountMode: "explicit", processorOptions: { maxChannels: 1, wasmBinary: bin } });
+        nodes.push(ns);
+      } catch(e){ console.warn("AI noise removal unavailable", e); flash("Izolarea vocii AI nu merge pe acest dispozitiv, folosesc varianta standard.", true); v.ns = "std"; saveSettings(); raw.getTracks().forEach(t => t.stop()); return getMic(); }
+    }
+    const gain = ctx.createGain(); gain.gain.value = v.micGain; nodes.push(gain);
+    let gate = null;
+    try { await fxModule(ctx, "./voice-gate.js"); gate = new AudioWorkletNode(ctx, "folk-gate", { channelCount: 1, channelCountMode: "explicit" }); gate.port.postMessage({ on: !!v.gate, db: v.gateDb }); nodes.push(gate); } catch(e){}
+    const dest = ctx.createMediaStreamDestination(); dest.channelCount = 1;
+    for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]);
+    nodes[nodes.length - 1].connect(dest);
+    const out = dest.stream, track = out.getAudioTracks()[0], stop = track.stop.bind(track);
+    track.stop = () => {
+      stop(); raw.getTracks().forEach(t => t.stop());
+      for (const n of nodes) try { n.disconnect(); } catch(e){}
+      if (ns) try { ns.port.postMessage("destroy"); } catch(e){}
+      if (gate) gate.port.onmessage = null;
+    };
+    out._fx = { gain, gate, raw };
+    return out;
+  } catch(e){ console.warn("voice fx failed", e); return raw; }
+}
+// live tweaks without re-opening the mic
+function micStreams(){ return [voice.stream, call.stream, micTest && micTest.stream].filter(Boolean); }
+function liveFx(){ for (const s of micStreams()) if (s._fx){ s._fx.gain.gain.value = settings.voice.micGain; if (s._fx.gate) s._fx.gate.port.postMessage({ on: !!settings.voice.gate, db: settings.voice.gateDb }); } }
+// device / processing changes: swap the track on every connection, no reconnect needed
+let reMicBusy = null;
+function reapplyMic(){
+  clearTimeout(reapplyMic.t);
+  reapplyMic.t = setTimeout(async () => {
+    if (reMicBusy) await reMicBusy.catch(() => {});
+    reMicBusy = (async () => {
+      const swap = async (holder, pcs) => {
+        if (!holder.stream) return;
+        let ns; try { ns = await getMic(); } catch(e){ micAlert(e); return; }
+        if (!holder.stream){ ns.getTracks().forEach(t => t.stop()); return; }
+        const tr = ns.getAudioTracks()[0];
+        for (const pc of pcs) for (const s of pc.getSenders()) if (s.track && s.track.kind === "audio") await s.replaceTrack(tr).catch(() => {});
+        const old = holder.stream; holder.stream = ns; old.getTracks().forEach(t => t.stop());
+        if (holder === voice) addMeter(uid, ns);
+      };
+      await swap(voice, [...voice.peers.values()].map(e => e.pc).filter(Boolean));
+      await swap(call, call.pc ? [call.pc] : []);
+      if (micTest){ const keep = micTest.loop; stopMicTest(); startMicTest(keep); }
+      syncMic();
+    })();
+  }, 250);
+}
+// ---- push-to-talk ----
+let pttDown = false, pttRelease = null;
+const pttOk = () => !settings.voice.ptt || pttDown;
+function syncMic(){
+  if (voice.stream) voice.stream.getAudioTracks().forEach(t => t.enabled = !voice.muted && !voice.deaf && pttOk());
+  if (call.stream) call.stream.getAudioTracks().forEach(t => t.enabled = !call.muted && pttOk());
+  for (const b of document.querySelectorAll(".ptt-btn")) b.classList.toggle("on", pttDown);
+}
+function pttSet(down){
+  clearTimeout(pttRelease);
+  if (down){ if (!pttDown){ pttDown = true; syncMic(); } return; }
+  pttRelease = setTimeout(() => { pttDown = false; syncMic(); }, settings.voice.pttDelay);
+}
+const pttCode = e => e.type.startsWith("mouse") ? "Mouse" + e.button : e.code;
+const editable = t => t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+function pttKeyHandler(e){
+  if (!settings.voice.ptt || pttBinding || (!voice.room && !call.pair)) return;
+  if (pttCode(e) !== settings.voice.pttKey || e.repeat) return;
+  if (e.type === "keydown" && editable(e.target) && e.key.length === 1) return;   // typing a message, not talking
+  if (e.type.startsWith("mouse") && e.button < 3) return;
+  pttSet(e.type === "keydown" || e.type === "mousedown");
+}
+for (const ev of ["keydown","keyup","mousedown","mouseup"]) addEventListener(ev, pttKeyHandler, true);
+addEventListener("blur", () => { if (pttDown) pttSet(false); });
+function pttButton(){
+  const b = h("button",{type:"button",class:"ptt-btn" + (pttDown ? " on" : ""),title:"Ține apăsat ca să vorbești (" + settings.voice.pttLabel + ")",text:"🎙️ Ține apăsat ca să vorbești"});
+  b.onpointerdown = e => { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch(x){} pttSet(true); };
+  b.onpointerup = b.onpointercancel = () => pttSet(false);
+  b.oncontextmenu = e => e.preventDefault();
+  return b;
+}
+let pttBinding = null;
+// ---- output: speaker choice, master + per-person volume ----
+function applyOut(a, id){
+  const v = settings.voice, uv = v.userVol[id];
+  a.volume = Math.max(0, Math.min(1, v.outVol * (uv == null ? 1 : uv)));
+  if (v.spkId && a.setSinkId && a.sinkId !== v.spkId) a.setSinkId(v.spkId).catch(() => {});
+  if (!v.spkId && a.setSinkId && a.sinkId) a.setSinkId("").catch(() => {});
+}
+function applyOutAll(){ for (const a of document.querySelectorAll("audio[id^='ra-']")) applyOut(a, a.id.slice(3)); }
+function userVolPop(id, anchor){
+  const old = $("uvPop"); if (old){ old.remove(); if (old.dataset.id === id) return; }
+  const p = P(id) || {}, cur = settings.voice.userVol[id] == null ? 1 : settings.voice.userVol[id];
+  const lab = h("span",{class:"note",text: Math.round(cur * 100) + "%"});
+  const r = h("input",{type:"range",min:"0",max:"1",step:"0.05","aria-label":"Volum " + (p.tag || "")}); r.value = cur;
+  const save = val => { if (val === 1) delete settings.voice.userVol[id]; else settings.voice.userVol[id] = val; saveSettings(); applyOutAll(); lab.textContent = Math.round(val * 100) + "%"; mute.textContent = val === 0 ? "🔈 Pornește" : "🔕 Mut"; renderVoice(); };
+  r.oninput = () => save(+r.value);
+  const mute = h("button",{type:"button",class:"tiny",text: cur === 0 ? "🔈 Pornește" : "🔕 Mut",onclick:() => { const nv = (settings.voice.userVol[id] === 0) ? 1 : 0; r.value = nv; save(nv); }});
+  const pop = h("div",{id:"uvPop",class:"uv-pop"}, h("div",{class:"row"}, h("b",{class:"grow",text:"🔉 " + (p.tag || "?")}), lab), r, h("div",{class:"row",style:"margin-top:6px"}, h("span",{class:"note grow",style:"font-size:11.5px",text:"Doar pentru tine"}), mute));
+  pop.dataset.id = id;
+  document.body.append(pop);
+  const b = anchor.getBoundingClientRect(), w = 230;
+  pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, b.left)) + "px";
+  pop.style.top = (b.bottom + 6 + 130 > innerHeight ? Math.max(8, b.top - 136) : b.bottom + 6) + "px";
+  setTimeout(() => { const off = ev => { if (!pop.contains(ev.target)){ pop.remove(); removeEventListener("pointerdown", off, true); } }; addEventListener("pointerdown", off, true); }, 0);
+}
+// ---- audio quality (Opus bitrate) ----
+const QUALITY = { normal: 32000, high: 64000, max: 128000 };
+function tunePC(pc){
+  for (const s of pc.getSenders()){
+    if (!s.track || s.track.kind !== "audio" || !s.getParameters) continue;
+    try { const p = s.getParameters(); if (!p.encodings || !p.encodings.length) p.encodings = [{}]; p.encodings[0].maxBitrate = QUALITY[settings.voice.quality] || 64000; p.encodings[0].priority = "high"; s.setParameters(p).catch(() => {}); } catch(e){}
+  }
+}
+function tuneAll(){ for (const e of voice.peers.values()) if (e.pc) tunePC(e.pc); if (call.pc) tunePC(call.pc); }
+// ---- mic test (Settings → Voce) ----
+let micTest = null;
+async function startMicTest(loop){
+  stopMicTest();
+  let stream; try { stream = await getMic(); } catch(e){ micAlert(e); return null; }
+  const t = { stream, loop: !!loop, audio: null, lvl: 0, open: true };
+  micTest = t;
+  if (stream._fx && stream._fx.gate) stream._fx.gate.port.onmessage = e => { t.lvl = e.data.lvl; t.open = e.data.open; };
+  else { const ctx = meterCtx(); if (ctx){ const an = ctx.createAnalyser(); an.fftSize = 512; ctx.createMediaStreamSource(stream).connect(an); const buf = new Float32Array(512); t.iv = setInterval(() => { an.getFloatTimeDomainData(buf); let s = 0; for (const x of buf) s += x * x; t.lvl = Math.sqrt(s / buf.length); }, 50); } }
+  if (t.loop){ t.audio = h("audio",{autoplay:""}); t.audio.style.display = "none"; document.body.append(t.audio); t.audio.srcObject = stream; if (settings.voice.spkId && t.audio.setSinkId) t.audio.setSinkId(settings.voice.spkId).catch(() => {}); t.audio.play().catch(() => {}); }
+  return t;
+}
+function stopMicTest(){
+  if (!micTest) return;
+  const t = micTest; micTest = null;
+  clearInterval(t.iv);
+  if (t.audio){ t.audio.srcObject = null; t.audio.remove(); }
+  t.stream.getTracks().forEach(x => x.stop());
+}
+const dbOf = lvl => lvl > 0 ? 20 * Math.log10(lvl) : -100;
+async function listDevices(){
+  try { return await navigator.mediaDevices.enumerateDevices(); } catch(e){ return []; }
+}
+function voiceSettings(body, toggle, redraw){
+  const v = settings.voice;
+  const set = (k, val, how) => { v[k] = val; saveSettings(); if (how === "re") reapplyMic(); else if (how === "live") liveFx(); else if (how === "out") applyOutAll(); else if (how === "q") tuneAll(); renderVoice(); if (call.pair) callUI(); };
+  const sel = (opts, cur, on) => { const s = h("select",null, opts.map(([val, lab]) => h("option",{value:val,text:lab}))); s.value = cur; if (s.value !== cur) s.value = opts.length ? opts[0][0] : ""; s.onchange = () => on(s.value); return s; };
+  const slider = (min, max, step, cur, fmt, on, onEnd) => {
+    const lab = h("span",{class:"note",text:fmt(cur)}), r = h("input",{type:"range",min:String(min),max:String(max),step:String(step)}); r.value = cur;
+    r.oninput = () => { lab.textContent = fmt(+r.value); on(+r.value); }; if (onEnd) r.onchange = () => onEnd(+r.value);
+    return [lab, r];
+  };
+  const micSel = h("div",null, h("div",{class:"note",text:"Se încarcă dispozitivele…"})), spkSel = h("div");
+  (async () => {
+    const devs = await listDevices();
+    const mics = devs.filter(d => d.kind === "audioinput"), spks = devs.filter(d => d.kind === "audiooutput");
+    const unnamed = mics.length && mics.every(d => !d.label);
+    micSel.replaceChildren(...[
+      sel([["", "Implicit (al sistemului)"], ...mics.filter(d => d.deviceId && d.deviceId !== "default").map((d, i) => [d.deviceId, d.label || "Microfon " + (i + 1)])], v.micId, val => set("micId", val, "re")),
+      unnamed ? h("button",{type:"button",class:"tiny",style:"margin-top:6px",text:"Arată numele microfoanelor",onclick:async () => { try { const s = await rawMic(); s.getTracks().forEach(t => t.stop()); redraw(); } catch(e){ micAlert(e); } }}) : null].filter(Boolean));
+    const canSink = "setSinkId" in HTMLMediaElement.prototype;
+    spkSel.replaceChildren(...(canSink && spks.length ? [h("div",{class:"h2",style:"margin-top:14px",text:"Difuzor / căști"}),
+      sel([["", "Implicit (al sistemului)"], ...spks.filter(d => d.deviceId && d.deviceId !== "default").map((d, i) => [d.deviceId, d.label || "Ieșire " + (i + 1)])], v.spkId, val => set("spkId", val, "out"))] : []));
+  })();
+  const nsOpts = [
+    ["off", "Oprit", "Sunetul brut al microfonului."],
+    ["std", "Standard", "Filtrul încorporat în browser / sistem. Ușor pe procesor."],
+    ["ai", "Izolare voce AI", "Rețea neurală (GTCRN) care lasă doar vocea ta: scoate tastatura, ventilatorul, traficul, câinele. Recomandat."],
+    ["lite", "AI ușor", "Model mai mic (RNNoise), pentru telefoane sau PC-uri slabe. Curăță mai puțin."]];
+  const ai = fxSupported();
+  const nsBox = h("div",{class:"seg"}, nsOpts.map(([k, lab, hint]) => h("button",{type:"button",class:(v.ns === k ? "on" : ""),disabled:((k === "ai" || k === "lite") && !ai) ? "" : null,title:hint,text:lab,onclick:() => { set("ns", k, "re"); redraw(); }})));
+  const nsHint = h("div",{class:"note",style:"margin-top:6px",text:(nsOpts.find(o => o[0] === v.ns) || nsOpts[2])[2] + (ai ? "" : " (AI nu e suportat aici.)")});
+  const [gLab, gR] = slider(0, 2, 0.05, v.micGain, x => Math.round(x * 100) + "%", x => set("micGain", x, "live"));
+  const [oLab, oR] = slider(0, 1, 0.05, v.outVol, x => Math.round(x * 100) + "%", x => set("outVol", x, "out"));
+  const [tLab, tR] = slider(-80, -20, 1, v.gateDb, x => x + " dB", x => { set("gateDb", x, "live"); mark.style.left = pct(x) + "%"; });
+  const pct = db => Math.max(0, Math.min(100, (db + 80) / 60 * 100));
+  const bar = h("div",{class:"vu-fill"}), mark = h("div",{class:"vu-mark"}); mark.style.left = pct(v.gateDb) + "%";
+  const vu = h("div",{class:"vu"}, bar, mark);
+  const vuNote = h("div",{class:"note",style:"font-size:12px;margin-top:4px",text:"Apasă „Testează” și vorbește. Bara se face verde când trece de prag."});
+  const testBtn = h("button",{type:"button",class:"tiny",text:"🎤 Testează microfonul"});
+  const loopCb = h("input",{type:"checkbox"}); const loopLab = h("label",{class:"inline-cb"}, loopCb, h("span",{text:" Ascultă-te (folosește căști)"}));
+  let raf = 0;
+  const paint = () => {
+    if (!vu.isConnected){ stopMicTest(); return; }
+    if (!micTest){ bar.style.width = "0%"; testBtn.textContent = "🎤 Testează microfonul"; return; }
+    const d = dbOf(micTest.lvl); bar.style.width = pct(d) + "%";
+    bar.classList.toggle("open", !v.gate || d > v.gateDb);
+    raf = requestAnimationFrame(paint);
+  };
+  testBtn.onclick = async () => {
+    if (micTest){ stopMicTest(); cancelAnimationFrame(raf); paint(); return; }
+    testBtn.textContent = "Se pornește…";
+    const t = await startMicTest(loopCb.checked);
+    testBtn.textContent = t ? "⏹ Oprește testul" : "🎤 Testează microfonul";
+    if (t) paint();
+  };
+  loopCb.onchange = async () => { if (micTest){ await startMicTest(loopCb.checked); paint(); } };
+  const keyBtn = h("button",{type:"button",class:"tiny",text:"Tasta: " + v.pttLabel});
+  keyBtn.onclick = () => {
+    keyBtn.textContent = "Apasă o tastă sau un buton lateral al mouse-ului…";
+    const done = e => {
+      if (e.type === "mousedown" && e.button < 3) { if (e.target === keyBtn) return; }
+      e.preventDefault(); e.stopPropagation();
+      removeEventListener("keydown", done, true); removeEventListener("mousedown", done, true); pttBinding = null;
+      if (e.type === "keydown" && e.code === "Escape"){ keyBtn.textContent = "Tasta: " + v.pttLabel; return; }
+      if (e.type === "mousedown" && e.button < 3){ keyBtn.textContent = "Tasta: " + v.pttLabel; return; }
+      v.pttKey = pttCode(e);
+      v.pttLabel = e.type === "mousedown" ? "Mouse " + (e.button + 1) : (e.key === " " ? "Space" : e.key.length === 1 ? e.key.toUpperCase() : e.code.replace(/^Key|^Digit/, ""));
+      saveSettings(); keyBtn.textContent = "Tasta: " + v.pttLabel; renderVoice();
+    };
+    pttBinding = done;
+    setTimeout(() => { addEventListener("keydown", done, true); addEventListener("mousedown", done, true); }, 0);
+  };
+  const [dLab, dR] = slider(0, 1000, 50, v.pttDelay, x => x + " ms", x => set("pttDelay", x));
+  const modeBox = h("div",{class:"seg"},
+    h("button",{type:"button",class:v.ptt ? "" : "on",text:"🗣️ Activare vocală",onclick:() => { set("ptt", false); syncMic(); redraw(); }}),
+    h("button",{type:"button",class:v.ptt ? "on" : "",text:"⌨️ Push-to-talk",onclick:() => { set("ptt", true); syncMic(); redraw(); }}));
+  body.replaceChildren(
+    h("div",{class:"h2",text:"Microfon"}), micSel, spkSel,
+    h("div",{class:"h2",style:"margin-top:18px",text:"Anulare zgomot"}), nsBox, nsHint,
+    toggle("Anulare ecou", () => v.echo, x => set("echo", x, "re"), "Oprește ecoul când nu porți căști"),
+    toggle("Volum automat al microfonului", () => v.agc, x => set("agc", x, "re"), "Ridică vocea când vorbești încet"),
+    h("div",{class:"row",style:"margin-top:14px"}, h("div",{class:"h2 grow",style:"margin:0",text:"Volum microfon"}), gLab), gR,
+    h("div",{class:"row",style:"margin-top:14px"}, h("div",{class:"h2 grow",style:"margin:0",text:"Volumul celorlalți"}), oLab), oR,
+    h("div",{class:"note",style:"font-size:12px",text:"Poți schimba volumul fiecărei persoane apăsând pe ea în canalul vocal."}),
+    h("div",{class:"h2",style:"margin-top:18px",text:"Test"}),
+    h("div",{class:"row",style:"flex-wrap:wrap;gap:10px"}, testBtn, loopLab), vu, vuNote,
+    toggle("Noise gate", () => v.gate, x => { set("gate", x, "live"); }, "Taie complet sunetul sub prag (respirație, zgomot de fundal)"),
+    h("div",{class:"row",style:"margin-top:4px"}, h("div",{class:"note grow",text:"Prag"}), tLab), tR,
+    h("div",{class:"h2",style:"margin-top:18px",text:"Mod de transmisie"}), modeBox,
+    v.ptt ? h("div",null,
+      h("div",{class:"row",style:"margin-top:10px;flex-wrap:wrap;gap:10px"}, keyBtn, h("span",{class:"note",style:"font-size:12px",text:"Funcționează când FolkChat e în prim-plan. Pe telefon apare un buton."})),
+      h("div",{class:"row",style:"margin-top:10px"}, h("div",{class:"note grow",text:"Întârziere la eliberare"}), dLab), dR) : null,
+    h("div",{class:"h2",style:"margin-top:18px",text:"Calitate audio"}),
+    sel([["normal","Normală (32 kbps) — date mobile"],["high","Înaltă (64 kbps)"],["max","Maximă (128 kbps) — muzică"]], v.quality, val => set("quality", val, "q")));
 }
 function micAlert(e){ flash(e.message || "Microfonul nu merge.", true); }
 
@@ -1327,7 +1608,7 @@ function tickMeters(){
     m.an.getByteTimeDomainData(m.buf);
     let sum = 0; for (let i = 0; i < m.buf.length; i++){ const v = (m.buf[i] - 128) / 128; sum += v * v; }
     const rms = Math.sqrt(sum / m.buf.length);
-    const silent = (id === uid && (voice.muted || call.muted));
+    const silent = (id === uid && (voice.muted || call.muted || !pttOk()));
     m.hot = (!silent && rms > 0.035) ? 4 : Math.max(0, m.hot - 1);
     const on = m.hot > 0;
     if (on !== voiceSpeaking.has(id)){ on ? voiceSpeaking.add(id) : voiceSpeaking.delete(id); changed = true; }
@@ -1340,7 +1621,7 @@ function paintSpeaking(){
 function playRemote(id, stream, deaf){
   let a = document.getElementById("ra-" + id);
   if (!a){ a = h("audio",{id:"ra-" + id, autoplay:"", playsinline:""}); a.style.display = "none"; document.body.append(a); }
-  a.srcObject = stream; a.muted = !!deaf; a.play().catch(() => {});
+  a.srcObject = stream; a.muted = !!deaf; applyOut(a, id); a.play().catch(() => {});
   addMeter(id, stream);
   return a;
 }
@@ -1375,13 +1656,16 @@ function callUI(){
   const status = call.state === "active" ? "Conectat · " + z(Math.floor(secs / 60)) + ":" + z(secs % 60) : call.role === "caller" ? "Sună…" : "Se conectează…";
   const av = avatar(call.other,"sm"); av.dataset.vu = call.other;
   bar.replaceChildren(av, h("div",{class:"grow",style:"min-width:0"}, h("b",{text:p.tag || "?"}), h("div",{class:"note",style:"font-size:12px",text:"📞 " + status})),
-    h("button",{type:"button",class:"icon" + (call.muted ? " off" : ""),title: call.muted ? "Pornește microfonul" : "Oprește microfonul","aria-label":"Microfon",text: call.muted ? "🔇" : "🎤",onclick:() => { call.muted = !call.muted; if (call.stream) call.stream.getAudioTracks().forEach(t => t.enabled = !call.muted); callUI(); }}),
+    h("button",{type:"button",class:"icon" + (call.muted ? " off" : ""),title: call.muted ? "Pornește microfonul" : "Oprește microfonul","aria-label":"Microfon",text: call.muted ? "🔇" : "🎤",onclick:() => { call.muted = !call.muted; syncMic(); callUI(); }}),
+    settings.voice.ptt ? pttButton() : null,
+    h("button",{type:"button",class:"icon",title:"Volumul lui " + (p.tag || "?"),"aria-label":"Volum",text:"🔉",onclick:ev => userVolPop(call.other, ev.currentTarget)}),
     h("button",{type:"button",class:"hang",title:"Închide","aria-label":"Închide apelul",text:"Închide",onclick:() => hangUp()}));
   paintSpeaking(); renderChatHeader();
 }
 function newCallPC(){
   const pc = new RTCPeerConnection(RTC_CFG);
   call.stream.getTracks().forEach(t => pc.addTrack(t, call.stream));
+  tunePC(pc);
   pc.onicecandidate = e => { if (e.candidate && call.pair) D.addCallIce(call.pair, e.candidate.toJSON()).catch(() => {}); };
   pc.ontrack = e => { call.audio = playRemote(call.other, e.streams[0] || new MediaStream([e.track]), false); };
   pc.onconnectionstatechange = () => {
@@ -1405,6 +1689,7 @@ async function startCallTo(other){
   if (voice.room) await leaveVoice();
   const pair = D.dmId(other).slice(3);
   Object.assign(call, { pair, other, role: "caller", state: "ringing", stream, muted: false, started: 0, iceQ: [], unsubs: [] });
+  syncMic();
   presenceSet(true);
   try {
     call.pc = newCallPC();
@@ -1457,6 +1742,7 @@ async function answer(c){
   let stream; try { stream = await getMic(); } catch(e){ micAlert(e); D.endCall(c.id); return; }
   if (voice.room) await leaveVoice();
   Object.assign(call, { pair: c.id, other: c.caller, role: "callee", state: "connecting", stream, muted: false, started: 0, iceQ: [], unsubs: [] });
+  syncMic();
   presenceSet(true);
   try {
     call.pc = newCallPC();
@@ -1506,6 +1792,7 @@ function vpc(other, initiator){
   const entry = { pc, iceQ: [] };
   voice.peers.set(other, entry);
   voice.stream.getTracks().forEach(t => pc.addTrack(t, voice.stream));
+  tunePC(pc);
   pc.onicecandidate = e => { if (e.candidate && voice.room === room) D.sendVoiceSig(room, other, "ice", e.candidate.toJSON()).catch(() => {}); };
   pc.ontrack = e => playRemote(other, e.streams[0] || new MediaStream([e.track]), voice.deaf);
   pc.onconnectionstatechange = () => { if (pc.connectionState === "failed" || pc.connectionState === "closed") stopRemote(other); };
@@ -1548,7 +1835,7 @@ async function joinVoice(room){
   let stream; try { stream = await getMic(); } catch(e){ micAlert(e); return; }
   if (voice.room) await leaveVoice(true);
   Object.assign(voice, { room, stream, joinedAt: Date.now(), peers: new Map() });
-  stream.getAudioTracks().forEach(t => t.enabled = !voice.muted && !voice.deaf);
+  syncMic();
   addMeter(uid, stream);
   await D.clearMySigs(room);
   try { await D.setVoicePeer(room, voice.muted, voice.deaf); }
@@ -1574,7 +1861,7 @@ async function leaveVoice(silent){
 }
 function setVoiceFlags(muted, deaf){
   voice.muted = muted; voice.deaf = deaf;
-  if (voice.stream) voice.stream.getAudioTracks().forEach(t => t.enabled = !muted && !deaf);
+  syncMic();
   for (const id of voice.peers.keys()){ const a = document.getElementById("ra-" + id); if (a) a.muted = deaf; }
   if (voice.room) D.setVoicePeer(voice.room, muted, deaf).catch(() => {});
   renderVoice();
@@ -1611,7 +1898,9 @@ function renderVoice(){
         isAdmin ? h("button",{type:"button",class:"ch-edit",title:"Editează","aria-label":"Editează canalul vocal",text:"⚙",onclick:ev => { ev.stopPropagation(); voiceRoomModal(r); }}) : null),
       peers.length ? h("div",{class:"vpeers"}, peers.map(p => {
         const av = avatar(p.id,"xs"); av.dataset.vu = p.id; if (voiceSpeaking.has(p.id)) av.classList.add("speaking");
-        return h("div",{class:"vpeer",title:(P(p.id)||{}).tag}, av, h("span",{class:"grow vpn",text:(P(p.id)||{}).tag}),
+        const uv = settings.voice.userVol[p.id];
+        return h("div",{class:"vpeer",title: p.id === uid ? (P(p.id)||{}).tag : "Volum · " + (P(p.id)||{}).tag,onclick: p.id === uid ? null : ev => { ev.stopPropagation(); userVolPop(p.id, ev.currentTarget); }}, av, h("span",{class:"grow vpn",text:(P(p.id)||{}).tag}),
+          uv === 0 ? h("span",{title:"Pus pe mut de tine",text:"🔕"}) : null,
           p.muted ? h("span",{title:"Microfon oprit",text:"🔇"}) : null, p.deaf ? h("span",{title:"Sunet oprit",text:"🙉"}) : null,
           isAdmin && p.id !== uid ? h("button",{type:"button",class:"ch-edit",title:"Scoate din canal","aria-label":"Scoate din canal",text:"✕",onclick:ev => { ev.stopPropagation(); D.kickVoicePeer(r.id, p.id).catch(writeErr); }}) : null);
       })) : null);
@@ -1625,7 +1914,10 @@ function renderVoice(){
     h("div",{class:"vp-btns"},
       h("button",{type:"button",class:voice.muted ? "off" : "",title:"Microfon",text:(voice.muted ? "🔇" : "🎤") + " Microfon",onclick:() => setVoiceFlags(!voice.muted, voice.deaf)}),
       h("button",{type:"button",class:voice.deaf ? "off" : "",title:"Sunet",text:(voice.deaf ? "🙉" : "🎧") + " Sunet",onclick:() => setVoiceFlags(voice.muted, !voice.deaf)}),
-      h("button",{type:"button",class:"hang",title:"Deconectare",text:"Deconectare",onclick:() => leaveVoice()})));
+      h("button",{type:"button",class:"vp-gear",title:"Setări voce","aria-label":"Setări voce",text:"⚙",onclick:() => openSettings("voice")}),
+      h("button",{type:"button",class:"hang",title:"Deconectare",text:"Deconectare",onclick:() => leaveVoice()})),
+    settings.voice.ptt ? h("div",{class:"vp-btns",style:"margin-top:6px"}, pttButton()) : null,
+    h("div",{class:"note",style:"font-size:11.5px;margin-top:6px",text:"🎛️ " + nsLabel()}));
   paintSpeaking();
 }
 
