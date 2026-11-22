@@ -535,6 +535,30 @@
   .pt-bar{height:5px;border-radius:99px;background:var(--panel3);margin:5px 0 3px;overflow:hidden}
   .pt-bar i{display:block;height:100%;background:linear-gradient(90deg,#22c55e,#4ade80);border-radius:99px}
   button.danger{border-color:rgba(244,63,94,.5);color:#fb7185}
+  /* weekly leaderboard */
+  .lb{border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:14px 16px;margin-bottom:18px}
+  .lb-title{font-weight:800;font-size:17px}
+  .lb-list{display:flex;flex-direction:column;gap:4px;margin-top:12px}
+  .lb-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;cursor:pointer}
+  .lb-row:hover{background:var(--panel2)}
+  .lb-row.top{background:var(--panel2)}
+  .lb-row.me{outline:1px solid rgba(74,222,128,.35)}
+  .lb-rank{width:28px;text-align:center;font-weight:800;font-size:18px;flex:none;color:var(--muted)}
+  .lb-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lb-h{color:#4ade80;flex:none;font-size:14px}
+  /* call bar dragging + voice overlay window */
+  .callbar .drag-h{cursor:grab;color:var(--muted);font-size:16px;padding:0 2px;user-select:none;touch-action:none}
+  .callbar{touch-action:none;user-select:none}
+  .callbar.dragging{opacity:.85;cursor:grabbing}
+  .callbar button.icon.on,.vp-btns button.vp-gear.on{background:rgba(74,222,128,.18);border-color:rgba(74,222,128,.5)}
+  body.ovl-body{margin:0;background:#0e0f12;overflow:hidden}
+  .ovl{padding:8px 10px;display:flex;flex-direction:column;gap:6px;font-family:inherit}
+  .ovl-top{display:flex;align-items:center;gap:6px}
+  .ovl-t{font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ovl-b{padding:4px 8px;font-size:14px;border-radius:8px}
+  .ovl-b.off{background:rgba(244,63,94,.2);border-color:rgba(244,63,94,.5)}
+  .ovl-row{display:flex;align-items:center;gap:8px;min-width:0}
+  .ovl-n{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;text-shadow:0 1px 2px #000}
   /* in-app message popups */
   .pop-box{position:fixed;z-index:85;top:calc(70px + var(--sat));right:16px;width:340px;display:flex;flex-direction:column;gap:8px;pointer-events:none}
   .pop{pointer-events:auto;display:flex;align-items:flex-start;gap:10px;padding:10px 10px 10px 12px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.5);cursor:pointer;animation:popin .2s ease-out;touch-action:pan-y;transition:opacity .18s,transform .18s}
@@ -702,6 +726,7 @@
 
     <!-- SQUAD -->
     <section id="v-squad" class="view hidden">
+      <div id="lbBox"></div>
       <div class="h2">Membri</div>
       <div class="grid" id="squadGrid"></div>
     </section>
@@ -767,6 +792,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=19"></script>
+<script type="module" src="app.js?v=20"></script>
 </body>
 </html>
