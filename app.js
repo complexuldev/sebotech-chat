@@ -519,7 +519,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeGifPick
 const DEFAULT_SETTINGS = {
   theme: "dark", accent: "#8b7cff", fontSize: 15, compact: false, h24: true, reduceMotion: false, showAvatars: true,
   sound: true, volume: 0.6, sfx: { msg: true, mention: true, dm: true, send: true, join: false, react: true },
-  notify: false, notifyAll: false, muted: {},
+  notify: false, notifyAll: false, popups: true, muted: {},
   voice: { micId: "", spkId: "", ns: "ai", echo: true, agc: true, micGain: 1, outVol: 1, gate: false, gateDb: -50,
            ptt: false, pttKey: "KeyV", pttLabel: "V", pttDelay: 200, quality: "high", userVol: {} }
 };
@@ -659,14 +659,15 @@ function onMsgs(cid, list){
   const prev = chMsgs[cid] || [];
   const prevIds = new Set(prev.map(m => m.id));
   chMsgs[cid] = list.slice().sort((a,b) => a.ts - b.ts);
-  if (chFirst[cid]){
+  // first snapshot = history, except for a conversation that appears while the app is already running (a brand-new DM)
+  if (chFirst[cid] || Date.now() - BOOT_TS > 8000){
     for (const m of chMsgs[cid]){
       if (prevIds.has(m.id) || m.uid === uid || Date.now() - m.ts > 60000) continue;
       const muted = settings.muted[cid];
       const here = cid === curCh && view === "chat" && !document.hidden;
-      if (isDmId(cid)){ if (!muted){ playSfx("dm"); notifyDesktop(m, cid, true); } }
-      else if (isMentioned(m)){ playSfx("mention"); notifyDesktop(m, cid, true); }
-      else if (!muted){ if (!here || settings.sfx.msg) playSfx("msg"); if (settings.notifyAll) notifyDesktop(m, cid, false); }
+      if (isDmId(cid)){ if (!muted){ playSfx("dm"); notifyDesktop(m, cid, true); if (!here) popMsg(m, cid, true); } }
+      else if (isMentioned(m)){ playSfx("mention"); notifyDesktop(m, cid, true); if (!here) popMsg(m, cid, true); }
+      else if (!muted){ if (!here || settings.sfx.msg) playSfx("msg"); if (settings.notifyAll){ notifyDesktop(m, cid, false); if (!here) popMsg(m, cid, false); } }
     }
   }
   chFirst[cid] = true;
@@ -693,6 +694,51 @@ function renderChatBadge(){
   b.classList.toggle("hidden", !mentions && !anyUnread);
   b.classList.toggle("dotonly", !mentions && anyUnread);
   document.title = (mentions ? "(" + mentions + ") " : anyUnread ? "• " : "") + "FolkChat";
+}
+// ---------- in-app popups (Discord-style) for messages from other conversations ----------
+const BOOT_TS = Date.now();
+const popTimers = {};
+function msgPreview(m){
+  if (m.text){
+    const t = m.text.replace(/\|\|[^|]+\|\|/g, "▒▒▒").replace(/[*_~`]{1,3}/g, "").replace(/\s+/g, " ").trim();
+    if (t) return t.slice(0, 160);
+  }
+  return m.gif ? "🎞️ GIF" : (m.img || m.pic) ? "🖼️ Imagine" : "…";
+}
+function popMsg(m, cid, important){
+  if (!settings.popups || document.hidden) return;   // in the background the system notification takes over
+  let box = $("popBox");
+  if (!box){ box = h("div",{id:"popBox",class:"pop-box","aria-live":"polite"}); document.body.append(box); }
+  const p = P(m.uid) || {}, dm = isDmId(cid);
+  const key = "pop-" + cid;
+  let el = document.getElementById(key), count = 1;
+  if (el){ count = (+el.dataset.n || 1) + 1; el.remove(); }
+  const open = () => { close(); location.hash = "#chat"; selectChannel(cid); };
+  const close = () => { clearTimeout(popTimers[key]); el.classList.add("out"); setTimeout(() => el.remove(), 180); };
+  const av = avatar(m.uid, "sm");
+  el = h("div",{id:key,class:"pop" + (important ? " imp" : ""),role:"button",tabindex:"0",title:"Deschide conversația"},
+    av,
+    h("div",{class:"pop-body"},
+      h("div",{class:"pop-head"},
+        h("b",{style:"color:" + accent(p),text:p.tag || "Cineva"}),
+        h("span",{class:"pop-where",text: dm ? "mesaj privat" : convName(cid)}),
+        count > 1 ? h("span",{class:"pop-n",text:"+" + (count - 1)}) : null),
+      h("div",{class:"pop-txt",text:msgPreview(m)})),
+    h("button",{type:"button",class:"pop-x","aria-label":"Închide",text:"✕",onclick:ev => { ev.stopPropagation(); close(); }}));
+  el.dataset.n = count;
+  let sx = null, moved = false;
+  el.onclick = () => { if (moved){ moved = false; return; } open(); };
+  el.onkeydown = e => { if (e.key === "Enter") open(); };
+  // swipe sideways to dismiss on phones
+  el.addEventListener("pointerdown", e => { sx = e.clientX; moved = false; });
+  el.addEventListener("pointermove", e => { if (sx === null) return; const dx = e.clientX - sx; if (Math.abs(dx) > 6){ moved = true; el.style.transform = "translateX(" + dx + "px)"; el.style.opacity = String(Math.max(0, 1 - Math.abs(dx) / 160)); } });
+  const end = e => { if (sx === null) return; const dx = e.clientX - sx; sx = null; if (Math.abs(dx) > 80) close(); else { el.style.transform = ""; el.style.opacity = ""; } };
+  el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+  const arm = () => { clearTimeout(popTimers[key]); popTimers[key] = setTimeout(close, important ? 7000 : 5000); };
+  el.onmouseenter = () => clearTimeout(popTimers[key]); el.onmouseleave = arm;
+  box.prepend(el);
+  while (box.children.length > 3) box.lastChild.remove();
+  arm();
 }
 function notifyDesktop(m, cid, mention){
   if (!settings.notify || !("Notification" in window) || Notification.permission !== "granted" || !document.hidden) return;
@@ -1093,6 +1139,7 @@ function openSettings(start){
           if (v && can && Notification.permission !== "granted"){ const r = await Notification.requestPermission(); if (r !== "granted"){ settings.notify = false; saveSettings(); flash("Browserul a blocat notificările.", true); draw(); return; } }
           settings.notify = v; saveSettings(); if (v) maybeWebPush();
         }, can ? "Apar când site-ul e în fundal" : "Browserul tău nu suportă notificări"),
+        toggle("Popup în aplicație", () => settings.popups, v => settings.popups = v, "Când primești un mesaj în altă conversație, apare sus cine ți-a scris și ce"),
         toggle("Notifică pentru toate mesajele din canale", () => settings.notifyAll, v => settings.notifyAll = v, "Mesajele private și @mențiunile notifică mereu"),
         h("div",{class:"h2",style:"margin-top:18px",text:"Conversații cu sunetul oprit"}),
         Object.keys(settings.muted).length ? h("div",null, Object.keys(settings.muted).map(id => { const c = isDmId(id) ? (P(dmOther(id)) ? { emoji:"💬", name: P(dmOther(id)).tag } : null) : channels.find(x => x.id === id); return c ? h("div",{class:"row",style:"margin:6px 0"}, h("span",{class:"grow",text:(c.emoji || "#") + " " + c.name}), h("button",{type:"button",class:"tiny",text:"Pornește",onclick:() => { delete settings.muted[id]; saveSettings(); renderChannels(); renderChatHeader(); draw(); }})) : null; })) : h("div",{class:"note",text:"Niciuna. Apasă 🔔 sus într-o conversație ca s-o pui pe mut."}));
