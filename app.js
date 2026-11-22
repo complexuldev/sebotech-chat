@@ -1411,6 +1411,14 @@ function renderMsgs(force){
   box.replaceChildren(...out);
   if (stick) scrollChat(true);
 }
+// Messages made only of emoji (up to 27, like Discord) are shown big.
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|[\u{1F3FB}-\u{1F3FF}\uFE0F\u200D\u20E3#*0-9]|\s)+$/u;
+function jumboEmoji(t){
+  t = String(t || "").trim();
+  if (!t || t.length > 300 || !EMOJI_ONLY.test(t) || !/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(t) || /^[#*0-9\s]+$/.test(t)) return false;
+  const n = window.Intl && Intl.Segmenter ? [...new Intl.Segmenter().segment(t.replace(/\s+/g, ""))].length : t.replace(/\s+/g, "").length / 2;
+  return n <= 27;
+}
 function msgEl(m, grouped){
   const mine = m.uid === uid, canDel = mine || (isAdmin && !isDmId(curCh));
   const row = h("div",{class:"msg" + (grouped ? "" : " first") + (!isDmId(curCh) && isMentioned(m) ? " mentioned" : ""), "data-id":m.id});
@@ -1435,7 +1443,7 @@ function msgEl(m, grouped){
     body.append(ta, h("div",{class:"note",style:"font-size:12px",text:"Enter = salvează · Esc = anulează"}));
     setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 20);
   } else if (m.text){
-    body.append(h("div",{class:"txt"}, richText(m.text), m.edited ? h("span",{class:"edited",text:" (editat)"}) : null));
+    body.append(h("div",{class:"txt" + (jumboEmoji(m.text) ? " jumbo" : "")}, richText(m.text), m.edited ? h("span",{class:"edited",text:" (editat)"}) : null));
   }
   if (hasAtt(m)) body.append(h("div",{class:"attwrap"}, attEl(m)));
   const rx = m.rx || {}, counts = {};
