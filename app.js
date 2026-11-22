@@ -1169,6 +1169,7 @@ function renderChatBadge(){
   b.classList.toggle("hidden", !mentions && !anyUnread);
   b.classList.toggle("dotonly", !mentions && anyUnread);
   document.title = (mentions ? "(" + mentions + ") " : anyUnread ? "• " : "") + "FolkChat";
+  if (nativeWin && mentions !== nativeMentions){ tInvoke("set_unread", { n: mentions, flash: mentions > nativeMentions }); nativeMentions = mentions; }
 }
 // ---------- in-app popups (Discord-style) for messages from other conversations ----------
 const BOOT_TS = Date.now();
@@ -2168,13 +2169,14 @@ function voiceSettings(body, toggle, redraw){
     h("div",{class:"row",style:"margin-top:4px"}, h("div",{class:"note grow",text:"Prag"}), tLab), tR,
     h("div",{class:"h2",style:"margin-top:18px",text:"Mod de transmisie"}), modeBox,
     v.ptt ? h("div",null,
-      h("div",{class:"row",style:"margin-top:10px;flex-wrap:wrap;gap:10px"}, keyBtn, h("span",{class:"note",style:"font-size:12px",text:"Funcționează când FolkChat e în prim-plan. Pe telefon apare un buton."})),
+      h("div",{class:"row",style:"margin-top:10px;flex-wrap:wrap;gap:10px"}, keyBtn, h("span",{class:"note",style:"font-size:12px",text: nativeWin ? "Merge și când ești în joc (aplicația de Windows citește tasta fără s-o blocheze)." : "Funcționează când FolkChat e în prim-plan. Pe telefon apare un buton."})),
       h("div",{class:"row",style:"margin-top:10px"}, h("div",{class:"note grow",text:"Întârziere la eliberare"}), dLab), dR) : null,
     h("div",{class:"h2",style:"margin-top:18px",text:"Calitate partajare ecran"}),
     sel(Object.entries(SHARE_Q).map(([k, q]) => [k, q.label + (k === "720p30" ? " — recomandat" : k === "720p60" ? " — jocuri, fluid" : k === "1080p60" ? " — jocuri, net foarte bun" : "")]), v.shareQ || "720p30", val => set("shareQ", val)),
     h("div",{class:"note",style:"font-size:12px;margin-top:4px",text:"Imaginea merge direct de la tine la prieteni (nu prin server). Fiecare prieten care se uită folosește din viteza ta de upload."}),
     h("div",{class:"h2",style:"margin-top:18px",text:"Calitate audio"}),
     sel([["normal","Normală (32 kbps) — date mobile"],["high","Înaltă (64 kbps)"],["max","Maximă (128 kbps) — muzică"]], v.quality, val => set("quality", val, "q")));
+  if (nativeWin) body.append(desktopSettings(toggle));
 }
 function micAlert(e){ flash(e.message || "Microfonul nu merge.", true); }
 
@@ -2205,6 +2207,7 @@ function tickMeters(){
   if (changed) paintSpeaking();
 }
 function paintSpeaking(){
+  if (ovl.native) renderOverlay();
   for (const el of document.querySelectorAll("[data-vu]")) el.classList.toggle("speaking", voiceSpeaking.has(el.dataset.vu));
   if (ovl.win && !ovl.win.closed) for (const el of ovl.win.document.querySelectorAll("[data-vu]")) el.classList.toggle("speaking", voiceSpeaking.has(el.dataset.vu));
 }
@@ -2384,7 +2387,7 @@ function makeDraggable(el, key){
 // Uses the browser's picture-in-picture window, which stays on top of other apps and of games in
 // borderless / windowed mode. Exclusive full-screen games draw over everything, so it can't show there.
 const ovl = { win: null, video: null, canvas: null, timer: null };
-const overlayOpen = () => !!((ovl.win && !ovl.win.closed) || (ovl.video && document.pictureInPictureElement === ovl.video));
+const overlayOpen = () => !!(ovl.native || (ovl.win && !ovl.win.closed) || (ovl.video && document.pictureInPictureElement === ovl.video));
 function ovlPeople(){
   if (voice.room){
     const r = voiceRooms.find(x => x.id === voice.room) || { name: "Voce" };
@@ -2394,6 +2397,7 @@ function ovlPeople(){
   return null;
 }
 function closeOverlay(){
+  if (ovl.native){ ovl.native = false; tInvoke("overlay_close"); }
   if (ovl.win && !ovl.win.closed) try { ovl.win.close(); } catch(e){}
   ovl.win = null;
   if (ovl.video){ if (document.pictureInPictureElement === ovl.video) document.exitPictureInPicture().catch(() => {}); clearInterval(ovl.timer); ovl.video.remove(); ovl.video = null; ovl.canvas = null; }
@@ -2404,6 +2408,15 @@ async function toggleOverlay(){
   if (overlayOpen()){ closeOverlay(); return; }
   const who = ovlPeople();
   if (!who){ flash("Overlay-ul arată cine e cu tine în apel sau în canalul vocal. Intră întâi într-unul.", true); return; }
+  if (nativeWin){
+    // Windows app: a real see-through window over the game; clicks go through it to the game.
+    let pos = null; try { pos = JSON.parse(localStorage.getItem("fc:ovlpos") || "null"); } catch(e){}
+    ovl.native = true;
+    await tInvoke("overlay_open", { x: pos ? pos[0] : null, y: pos ? pos[1] : null });
+    renderVoiceBtns();
+    if (!localStorage.getItem("fc:ovlhint")){ try { localStorage.setItem("fc:ovlhint", "1"); } catch(e){} flash("Overlay-ul e în colțul ecranului. Îl muți din Setări → Voce → Aplicația de Windows."); }
+    return;
+  }
   if (window.documentPictureInPicture){
     try {
       const w = await documentPictureInPicture.requestWindow({ width: 250, height: Math.min(420, 70 + who.list.length * 38) });
@@ -2437,6 +2450,7 @@ async function toggleOverlay(){
 function renderOverlay(){
   const who = ovlPeople();
   if (!who){ if (overlayOpen()) closeOverlay(); return; }
+  if (ovl.native){ pushNativeOverlay(who); return; }
   if (!(ovl.win && !ovl.win.closed)) return;   // the canvas version redraws itself
   const d = ovl.win.document;
   const rows = who.list.map(p => {
@@ -2495,11 +2509,89 @@ function ring(kind){
 }
 function stopRing(){ if (ringTimer){ clearInterval(ringTimer); ringTimer = null; } }
 
+// =========================== Windows app (native helpers) ===========================
+// The FolkChat Windows app (desktop/tauri) adds: game detection, push-to-talk while a game is focused,
+// a see-through overlay window, tray + start with Windows. In a browser (or the old app) none of this runs.
+const TAURI = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.event ? window.__TAURI__ : null;
+var nativeWin = false, nativeMentions = 0, nativePttVk = -1, gameTimer = null, gamesMod = null;   // var: read by code above
+const tInvoke = (cmd, args) => nativeWin ? TAURI.core.invoke(cmd, args || {}).catch(e => { console.warn("native " + cmd, e); }) : Promise.resolve();
+// KeyboardEvent.code / "MouseN" (what the PTT setting stores) -> Windows virtual-key code
+function vkOf(code){
+  let m;
+  if ((m = /^Key([A-Z])$/.exec(code))) return m[1].charCodeAt(0);
+  if ((m = /^Digit(\d)$/.exec(code))) return 0x30 + +m[1];
+  if ((m = /^Numpad(\d)$/.exec(code))) return 0x60 + +m[1];
+  if ((m = /^F(\d{1,2})$/.exec(code)) && +m[1] >= 1 && +m[1] <= 24) return 0x6F + +m[1];
+  return ({ Mouse1: 0x04, Mouse3: 0x05, Mouse4: 0x06, Space: 0x20, Tab: 0x09, CapsLock: 0x14, Backquote: 0xC0,
+    ShiftLeft: 0xA0, ShiftRight: 0xA1, ControlLeft: 0xA2, ControlRight: 0xA3, AltLeft: 0xA4, AltRight: 0xA5,
+    Insert: 0x2D, Delete: 0x2E, Home: 0x24, End: 0x23, PageUp: 0x21, PageDown: 0x22,
+    ArrowLeft: 0x25, ArrowUp: 0x26, ArrowRight: 0x27, ArrowDown: 0x28,
+    Minus: 0xBD, Equal: 0xBB, BracketLeft: 0xDB, BracketRight: 0xDD, Backslash: 0xDC, Semicolon: 0xBA, Quote: 0xDE,
+    Comma: 0xBC, Period: 0xBE, Slash: 0xBF, NumpadAdd: 0x6B, NumpadSubtract: 0x6D, NumpadMultiply: 0x6A, NumpadDivide: 0x6F,
+    NumpadDecimal: 0x6E, Pause: 0x13, ScrollLock: 0x91 })[code] || 0;
+}
+function nativePttSync(){
+  if (!nativeWin) return;
+  const vk = settings.voice.ptt && (voice.room || call.pair) ? vkOf(settings.voice.pttKey) : 0;
+  if (vk !== nativePttVk){ nativePttVk = vk; tInvoke("ptt_watch", { vk }); }
+}
+var ovlPushT = null, ovlLast = "", ovlPending = false;
+function pushNativeOverlay(who){
+  if (ovlPushT){ ovlPending = true; return; }   // at most ~12 updates a second, the last one always sent
+  ovlPushT = setTimeout(() => { ovlPushT = null; if (ovlPending){ ovlPending = false; renderOverlay(); } }, 80);
+  const data = { title: who.title, bg: settings.ovlBg != null ? settings.ovlBg : 0.55, list: who.list.map(p => {
+    const pr = P(p.id) || {};
+    return { name: pr.tag || "?", color: accent(pr), img: pr.avatar || "", emoji: pr.emoji || "", talk: voiceSpeaking.has(p.id), muted: !!p.muted, deaf: !!p.deaf };
+  }) };
+  const j = JSON.stringify(data); if (j === ovlLast) return; ovlLast = j;
+  TAURI.event.emitTo("overlay", "ovl", data).catch(() => {});
+}
+// ---- game detection: every 20 s, look at the running programs (cheap: one list, no screenshots) ----
+async function detectGame(){
+  if (!nativeWin || !me || settings.autoGame === false) return;
+  try {
+    gamesMod = gamesMod || await import("./vendor/games.js?v=1");
+    const [procs, fg] = await Promise.all([TAURI.core.invoke("procs"), TAURI.core.invoke("foreground")]);
+    const g = gamesMod.detect(procs, fg);
+    if (g){
+      if (!myAct || (myAct.auto && myAct.n !== g[0])){ setActivity({ n: g[0], k: "play", e: g[1] }); myAct.auto = true; actStore(); }
+    } else if (myAct && myAct.auto) setActivity(null);
+  } catch(e){ console.warn("game detection", e); }
+}
+function desktopSettings(toggle){
+  const auto = h("label",{class:"row",style:"gap:8px;margin-top:6px;cursor:pointer"});
+  const autoCb = h("input",{type:"checkbox"}); auto.append(autoCb, h("span",{text:"Pornește FolkChat odată cu Windows (ascuns lângă ceas)"}));
+  TAURI.core.invoke("plugin:autostart|is_enabled").then(on => { autoCb.checked = !!on; }).catch(() => { auto.remove(); });
+  autoCb.onchange = () => TAURI.core.invoke("plugin:autostart|" + (autoCb.checked ? "enable" : "disable")).catch(() => { autoCb.checked = !autoCb.checked; });
+  const bgLab = h("span",{class:"note",text: Math.round((settings.ovlBg != null ? settings.ovlBg : 0.55) * 100) + "%"});
+  const bg = h("input",{type:"range",min:"0",max:"0.9",step:"0.05"}); bg.value = settings.ovlBg != null ? settings.ovlBg : 0.55;
+  bg.oninput = () => { settings.ovlBg = +bg.value; bgLab.textContent = Math.round(+bg.value * 100) + "%"; ovlLast = ""; renderOverlay(); };
+  bg.onchange = () => saveSettings();
+  return h("div",null,
+    h("div",{class:"h2",style:"margin-top:18px",text:"🖥️ Aplicația de Windows"}),
+    toggle("Detectează automat jocul", () => settings.autoGame !== false, x => { settings.autoGame = x; saveSettings(); if (!x && myAct && myAct.auto) setActivity(null); else detectGame(); },
+      "Când pornești un joc, prietenii văd ce joci și orele se adună singure. Activitatea pusă de mână are prioritate."),
+    auto,
+    h("div",{class:"row",style:"margin-top:14px;flex-wrap:wrap;gap:10px"},
+      h("button",{type:"button",class:"tiny",text:"🪟 Mută overlay-ul",onclick:async () => { if (!ovl.native) await toggleOverlay(); if (ovl.native){ tInvoke("overlay_interactive", { on: true }); flash("Trage overlay-ul unde vrei, apoi apasă „Gata” pe el."); } }}),
+      h("span",{class:"note",style:"font-size:12px",text:"Merge peste jocurile în modul „Borderless/Windowed”, nu peste „Fullscreen” exclusiv."})),
+    h("div",{class:"row",style:"margin-top:10px"}, h("div",{class:"note grow",text:"Fundal overlay"}), bgLab), bg);
+}
+function nativeInit(){
+  TAURI.event.listen("ptt", e => { if (settings.voice.ptt && (voice.room || call.pair)) pttSet(!!e.payload); });
+  TAURI.event.listen("ovl-ready", () => { ovlLast = ""; renderOverlay(); });
+  TAURI.event.listen("ovl-pos", e => { try { localStorage.setItem("fc:ovlpos", JSON.stringify(e.payload)); } catch(err){} });
+  nativePttSync();
+  clearInterval(gameTimer); gameTimer = setInterval(detectGame, 20000); setTimeout(detectGame, 3000);
+}
+if (TAURI) TAURI.core.invoke("app_version").then(() => { nativeWin = true; nativeInit(); }).catch(() => {});
+
 // =========================== 1-on-1 calls ===========================
 // Android app: while in a call/voice room, a native foreground service (with an ongoing notification) keeps
 // the mic and audio running when you switch to another app. Without it Android silences/freezes the app.
 let nativeCallOn = false;
 function syncNativeCall(){
+  nativePttSync();
   const FC = D.plugin("FolkCall"); if (!FC) return;
   const on = !!(voice.room || call.pair);
   if (on === nativeCallOn) return;
