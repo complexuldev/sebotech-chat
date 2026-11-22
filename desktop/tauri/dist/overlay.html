@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<title>FolkChat overlay</title>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; user-select: none; cursor: default; }
+  body { font: 600 14px/1.2 "Segoe UI", system-ui, sans-serif; color: #fff; padding: 6px; }
+  #box { display: inline-flex; flex-direction: column; gap: 4px; min-width: 120px; max-width: 244px; }
+  .t { font-size: 11px; font-weight: 700; letter-spacing: .3px; color: #d6d9e0; text-shadow: 0 1px 3px #000, 0 0 2px #000; padding: 0 4px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .r { display: flex; align-items: center; gap: 8px; padding: 3px 10px 3px 3px; border-radius: 99px; background: rgba(14, 15, 18, var(--bg, .55)); width: max-content; max-width: 236px; }
+  .av { width: 28px; height: 28px; flex: none; border-radius: 50%; background: #2a2d35; display: grid; place-items: center; font-size: 16px; overflow: hidden; box-shadow: 0 0 0 2px transparent; transition: box-shadow .08s; }
+  .av img { width: 100%; height: 100%; object-fit: cover; }
+  .talk .av { box-shadow: 0 0 0 2px #3ef08a, 0 0 8px #3ef08a; }
+  .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; color: #c9ccd3; }
+  .talk .n { color: #fff; }
+  .ic { font-size: 12px; opacity: .9; }
+  body.move #box { outline: 2px dashed #7aa2ff; outline-offset: 3px; border-radius: 10px; background: rgba(20, 24, 40, .6); cursor: move; }
+  .hint { display: none; font-size: 11px; color: #fff; background: #4a6cf7; border-radius: 8px; padding: 5px 8px; text-align: center; }
+  .hint button { all: unset; cursor: pointer; background: #fff; color: #1b2340; border-radius: 6px; padding: 2px 8px; margin-left: 6px; font-weight: 700; }
+  body.move .hint { display: block; }
+</style>
+</head>
+<body>
+<div id="box" data-tauri-drag-region></div>
+<script>
+  const T = window.__TAURI__, box = document.getElementById("box");
+  let last = null;
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; e.setAttribute("data-tauri-drag-region", ""); return e; };
+  function draw(d){
+    last = d;
+    document.documentElement.style.setProperty("--bg", String(d.bg != null ? d.bg : .55));
+    const kids = [];
+    const hint = el("div", "hint", "Trage ca să muți overlay-ul");
+    const done = document.createElement("button"); done.textContent = "Gata";
+    done.onclick = () => T.core.invoke("overlay_interactive", { on: false });
+    hint.append(done); kids.push(hint);
+    if (d.title) kids.push(el("div", "t", d.title));
+    for (const p of d.list || []){
+      const r = el("div", "r" + (p.talk ? " talk" : ""));
+      const av = el("span", "av");
+      if (p.img){ const i = document.createElement("img"); i.src = p.img; i.alt = ""; i.onerror = () => { i.remove(); av.textContent = p.emoji || "🙂"; }; av.append(i); } else av.textContent = p.emoji || "🙂";
+      const n = el("span", "n", p.name || "?"); if (p.color) n.style.color = p.talk ? "#fff" : p.color;
+      r.append(av, n);
+      if (p.deaf) r.append(el("span", "ic", "🙉")); else if (p.muted) r.append(el("span", "ic", "🔇"));
+      kids.push(r);
+    }
+    box.replaceChildren(...kids);
+    requestAnimationFrame(() => T.core.invoke("overlay_fit", { h: Math.ceil(box.getBoundingClientRect().height + 16) }));
+  }
+  T.event.listen("ovl", e => draw(e.payload || {}));
+  T.event.listen("ovl-move", e => { document.body.classList.toggle("move", !!e.payload); if (last) draw(last); });
+  // ask the main window for the current state once we're ready
+  T.event.emitTo("main", "ovl-ready", true);
+</script>
+</body>
+</html>
