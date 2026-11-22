@@ -2496,7 +2496,23 @@ function ring(kind){
 function stopRing(){ if (ringTimer){ clearInterval(ringTimer); ringTimer = null; } }
 
 // =========================== 1-on-1 calls ===========================
+// Android app: while in a call/voice room, a native foreground service (with an ongoing notification) keeps
+// the mic and audio running when you switch to another app. Without it Android silences/freezes the app.
+let nativeCallOn = false;
+function syncNativeCall(){
+  const FC = D.plugin("FolkCall"); if (!FC) return;
+  const on = !!(voice.room || call.pair);
+  if (on === nativeCallOn) return;
+  nativeCallOn = on;
+  if (on){
+    const r = voice.room && (voiceRooms.find(x => x.id === voice.room) || { name: "Voce" });
+    const other = call.pair && P(call.other);
+    const title = r ? "🔊 Ești pe vocal: " + r.name : "📞 În apel cu " + ((other && other.tag) || "un prieten");
+    Promise.resolve(FC.start({ title })).catch(() => { nativeCallOn = false; });
+  } else Promise.resolve(FC.stop()).catch(() => {});
+}
 function callUI(){
+  syncNativeCall();
   let bar = $("callBar");
   if (!call.pair){ if (bar) bar.remove(); renderChatHeader(); return; }
   if (!bar){ bar = h("div",{id:"callBar",class:"callbar"}); document.body.append(bar); }
@@ -2746,6 +2762,7 @@ function voiceRoomModal(r){
   setTimeout(() => name.focus(), 30);
 }
 function renderVoice(){
+  syncNativeCall();
   const box = $("voiceList"); if (!box || !me) return;
   $("voiceAdd").classList.toggle("hidden", !isAdmin);
   box.replaceChildren(...voiceRooms.map(r => {
