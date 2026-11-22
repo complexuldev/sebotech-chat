@@ -1,5 +1,5 @@
 // FolkChat – app UI. All user text is rendered with textContent (no HTML injection).
-import * as D from "./data.js?v=12";
+import * as D from "./data.js?v=13";
 import { OWNER_EMAIL, KLIPY_KEY, MEDIA_URL, VAPID_KEY } from "./config.js?v=11";
 
 const EMOJIS = ["😎","🐱","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
@@ -208,6 +208,7 @@ function startApp(){
   // Online status: written only when it actually changes (no heartbeats, no typing pings).
   actRestore();
   presenceSet(true);
+  setTimeout(() => D.prunePlaytime().catch(() => {}), 20000);
   let awayTimer = null;
   document.addEventListener("visibilitychange", () => {
     clearTimeout(awayTimer);
@@ -218,6 +219,46 @@ function startApp(){
   window.addEventListener("pagehide", () => { actFlush(); presenceSet(false); leaveVoice(true); if (call.pair) hangUp(true); });
 
   bindUi();
+}
+// ---------- weekly leaderboard: most hours played (Monday–Sunday) ----------
+let lbWeek = 0, lbTimer = null, lbData = null, lbAt = 0;
+async function renderLeaderboard(force){
+  const box = $("lbBox"); if (!box || !me) return;
+  if (force || !lbData || Date.now() - lbAt > 120000){
+    try { lbData = await D.getAllPlaytime(); lbAt = Date.now(); } catch(e){ lbData = lbData || []; }
+  }
+  const wk = D.weekId(Date.now() - lbWeek * 7 * 86400000);
+  const rowsL = Object.keys(profiles).map(id => {
+    const d = (lbData || []).find(x => x.id === id) || {};
+    let sec = (d.wk || {})[wk] || 0;
+    const games = Object.assign({}, (d.wkg || {})[wk] || {});
+    if (id === uid && lbWeek === 0 && myAct && myAct.k === "play" && actCk){   // minutes not saved yet
+      const extra = (Date.now() - actCk) / 1000; sec += extra; const k = gameKey(myAct.n); games[k] = (games[k] || 0) + extra;
+    }
+    const topK = Object.keys(games).sort((a, b) => games[b] - games[a])[0];
+    const topName = topK ? (((d.g || {})[topK] || {}).n || (myAct && gameKey(myAct.n) === topK ? myAct.n : topK)) : "";
+    return { id, sec, topName, topSec: topK ? games[topK] : 0 };
+  }).filter(r => r.sec >= 60).sort((a, b) => b.sec - a.sec);
+  const max = rowsL.length ? rowsL[0].sec : 1;
+  const medal = i => ["🥇","🥈","🥉"][i] || String(i + 1);
+  const days = lbWeek === 0 ? (() => { const n = new Date(), left = 7 - ((n.getDay() + 6) % 7); return left === 1 ? "se termină azi" : "încă " + left + " zile"; })() : "";
+  box.replaceChildren(h("div",{class:"lb"},
+    h("div",{class:"row",style:"gap:8px;flex-wrap:wrap"},
+      h("div",{class:"grow"}, h("div",{class:"lb-title",text:"🏆 Clasament ore jucate"}), h("div",{class:"note",style:"font-size:12px",text: (lbWeek === 0 ? "Săptămâna asta" : "Săptămâna trecută") + (days ? " · " + days : "")})),
+      h("div",{class:"seg"},
+        h("button",{type:"button",class:lbWeek === 0 ? "on" : "",text:"Săptămâna asta",onclick:() => { lbWeek = 0; renderLeaderboard(); }}),
+        h("button",{type:"button",class:lbWeek === 1 ? "on" : "",text:"Trecută",onclick:() => { lbWeek = 1; renderLeaderboard(); }}))),
+    rowsL.length ? h("div",{class:"lb-list"}, rowsL.slice(0, 10).map((r, i) => {
+      const p = P(r.id) || {};
+      return h("div",{class:"lb-row" + (i < 3 ? " top" : "") + (r.id === uid ? " me" : ""),onclick:() => openProfile(r.id)},
+        h("span",{class:"lb-rank",text:medal(i)}), avatar(r.id,"sm"),
+        h("div",{class:"grow",style:"min-width:0"},
+          h("div",{class:"row",style:"gap:8px"}, h("b",{class:"grow lb-n",style:"color:" + accent(p),text:p.tag || "?"}), h("b",{class:"lb-h",text:hours(r.sec)})),
+          h("div",{class:"pt-bar"}, h("i",{style:"width:" + Math.max(3, Math.round(r.sec / max * 100)) + "%"})),
+          r.topName ? h("div",{class:"note",style:"font-size:11.5px",text:"Cel mai mult: " + r.topName + " · " + hours(r.topSec)}) : null));
+    })) : h("div",{class:"note",style:"margin-top:10px",text: lbWeek === 0 ? "Nimeni n-a jucat încă săptămâna asta. Setează-ți jocul din 🎮 (lângă numele tău) și orele se adună singure." : "Nimic jucat săptămâna trecută."})));
+  clearTimeout(lbTimer);
+  if (view === "squad") lbTimer = setTimeout(() => renderLeaderboard(), 60000);
 }
 // ---------- activity: "Joacă Fortnite · 1h 12m" + hours played per game ----------
 const ACT_KINDS = { play: "Joacă", listen: "Ascultă", watch: "Se uită la", custom: "" };
@@ -393,6 +434,7 @@ function route(){
   for (const a of $("tabs").children) a.classList.toggle("on", a.dataset.v === view);
   if (view === "chat"){ markRead(); fitChat(); scrollChat(true); if (!isMobileLayout()) setTimeout(()=>$("chatIn").focus(), 50); }
   if (view === "me") fillMeForm();
+  if (view === "squad") renderLeaderboard();
   window.scrollTo(0,0);
 }
 window.addEventListener("hashchange", () => { if (started && me) route(); });
@@ -947,7 +989,7 @@ function dmPicker(){
 function renderUserPanel(){
   if (!me) return;
   $("userPanel").replaceChildren(
-    h("div",{class:"up-me",onclick:() => openProfile(uid)}, avatar(uid,"sm"),
+    h("div",{class:"up-me",onclick:() => openProfile(uid)}, (a => { a.dataset.vu = uid; if (voiceSpeaking.has(uid)) a.classList.add("speaking"); return a; })(avatar(uid,"sm")),
       h("div",{class:"grow",style:"min-width:0"}, h("div",{class:"up-name",text:me.tag}), myAct ? h("div",{class:"up-st act-on",text:(myAct.e || ACT_ICON[myAct.k]) + " " + actText(myAct)}) : h("div",{class:"up-st",text: me.status || "Online"}))),
     h("button",{type:"button",class:"icon" + (myAct ? " act-btn-on" : ""),title: myAct ? actText(myAct) + " · schimbă" : "Setează ce joci / faci","aria-label":"Activitate",text:"🎮",onclick:activityModal}),
     h("button",{type:"button",class:"icon",title: settings.sound ? "Oprește sunetele" : "Pornește sunetele","aria-label":"Sunete",text: settings.sound ? "🔊" : "🔇",onclick:() => { settings.sound = !settings.sound; saveSettings(); renderUserPanel(); if (settings.sound) playSfx("test"); }}),
@@ -1630,7 +1672,7 @@ function reapplyMic(){
         const tr = ns.getAudioTracks()[0];
         for (const pc of pcs) for (const s of pc.getSenders()) if (s.track && s.track.kind === "audio") await s.replaceTrack(tr).catch(() => {});
         const old = holder.stream; holder.stream = ns; old.getTracks().forEach(t => t.stop());
-        if (holder === voice) addMeter(uid, ns);
+        if (holder === voice || !voice.room) addMeter(uid, ns);
       };
       await swap(voice, [...voice.peers.values()].map(e => e.pc).filter(Boolean));
       await swap(call, call.pc ? [call.pc] : []);
@@ -1850,6 +1892,123 @@ function tickMeters(){
 }
 function paintSpeaking(){
   for (const el of document.querySelectorAll("[data-vu]")) el.classList.toggle("speaking", voiceSpeaking.has(el.dataset.vu));
+  if (ovl.win && !ovl.win.closed) for (const el of ovl.win.document.querySelectorAll("[data-vu]")) el.classList.toggle("speaking", voiceSpeaking.has(el.dataset.vu));
+}
+// ---- drag anything around (call bar); position remembered per device ----
+function makeDraggable(el, key){
+  const clamp = (x, y) => [Math.max(4, Math.min(innerWidth - el.offsetWidth - 4, x)), Math.max(4, Math.min(innerHeight - el.offsetHeight - 4, y))];
+  const place = (x, y) => { [x, y] = clamp(x, y); el.style.left = x + "px"; el.style.top = y + "px"; el.style.transform = "none"; el.classList.add("moved"); };
+  const reset = () => { el.style.left = el.style.top = el.style.transform = ""; el.classList.remove("moved"); try { localStorage.removeItem(key); } catch(e){} };
+  try { const p = JSON.parse(localStorage.getItem(key) || "null"); if (p) requestAnimationFrame(() => place(p.x * innerWidth, p.y * innerHeight)); } catch(e){}
+  let start = null;
+  el.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest("button, input, a, .ptt-btn")) return;
+    const r = el.getBoundingClientRect();
+    start = { dx: e.clientX - r.left, dy: e.clientY - r.top, id: e.pointerId, moved: false, x0: e.clientX, y0: e.clientY };
+    try { el.setPointerCapture(e.pointerId); } catch(x){}
+  });
+  el.addEventListener("pointermove", e => {
+    if (!start || e.pointerId !== start.id) return;
+    if (!start.moved && Math.hypot(e.clientX - start.x0, e.clientY - start.y0) < 4) return;
+    start.moved = true; el.classList.add("dragging");
+    place(e.clientX - start.dx, e.clientY - start.dy);
+  });
+  const end = e => {
+    if (!start) return;
+    if (start.moved){ const r = el.getBoundingClientRect(); try { localStorage.setItem(key, JSON.stringify({ x: r.left / innerWidth, y: r.top / innerHeight })); } catch(x){} }
+    start = null; el.classList.remove("dragging");
+  };
+  el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+  el.addEventListener("dblclick", e => { if (!e.target.closest("button")) reset(); });
+  addEventListener("resize", () => { if (el.classList.contains("moved")) place(parseFloat(el.style.left) || 0, parseFloat(el.style.top) || 0); });
+}
+
+// ---- voice overlay: small always-on-top window with who's talking (like Discord's overlay) ----
+// Uses the browser's picture-in-picture window, which stays on top of other apps and of games in
+// borderless / windowed mode. Exclusive full-screen games draw over everything, so it can't show there.
+const ovl = { win: null, video: null, canvas: null, timer: null };
+const overlayOpen = () => !!((ovl.win && !ovl.win.closed) || (ovl.video && document.pictureInPictureElement === ovl.video));
+function ovlPeople(){
+  if (voice.room){
+    const r = voiceRooms.find(x => x.id === voice.room) || { name: "Voce" };
+    return { title: (r.emoji || "🔊") + " " + r.name, list: (voiceRoster[voice.room] || []).filter(p => profiles[p.id]).map(p => ({ id: p.id, muted: p.id === uid ? voice.muted : p.muted, deaf: p.id === uid ? voice.deaf : p.deaf })) };
+  }
+  if (call.pair) return { title: "📞 Apel", list: [{ id: uid, muted: call.muted }, { id: call.other }] };
+  return null;
+}
+function closeOverlay(){
+  if (ovl.win && !ovl.win.closed) try { ovl.win.close(); } catch(e){}
+  ovl.win = null;
+  if (ovl.video){ if (document.pictureInPictureElement === ovl.video) document.exitPictureInPicture().catch(() => {}); clearInterval(ovl.timer); ovl.video.remove(); ovl.video = null; ovl.canvas = null; }
+  renderVoiceBtns();
+}
+function renderVoiceBtns(){ if (voice.room) renderVoice(); if (call.pair) callUI(); }
+async function toggleOverlay(){
+  if (overlayOpen()){ closeOverlay(); return; }
+  const who = ovlPeople();
+  if (!who){ flash("Overlay-ul arată cine e cu tine în apel sau în canalul vocal. Intră întâi într-unul.", true); return; }
+  if (window.documentPictureInPicture){
+    try {
+      const w = await documentPictureInPicture.requestWindow({ width: 250, height: Math.min(420, 70 + who.list.length * 38) });
+      ovl.win = w;
+      for (const st of document.querySelectorAll("style, link[rel=stylesheet]")) w.document.head.append(st.cloneNode(true));
+      w.document.documentElement.style.cssText = document.documentElement.style.cssText;
+      w.document.documentElement.className = document.documentElement.className;
+      w.document.body.className = document.body.className + " ovl-body";
+      w.document.title = "FolkChat";
+      w.addEventListener("pagehide", () => { ovl.win = null; renderVoiceBtns(); });
+      renderOverlay(); renderVoiceBtns();
+      return;
+    } catch(e){ console.warn("doc PiP failed", e); }
+  }
+  if (document.pictureInPictureEnabled && HTMLCanvasElement.prototype.captureStream){
+    try {
+      const c = document.createElement("canvas"); c.width = 500; c.height = 120 + who.list.length * 76;
+      const v = h("video",{muted:"",playsinline:""}); v.muted = true; v.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;bottom:0;left:0";
+      document.body.append(v);
+      ovl.canvas = c; ovl.video = v;
+      drawOverlay(); v.srcObject = c.captureStream(10); await v.play();
+      ovl.timer = setInterval(drawOverlay, 150);
+      v.addEventListener("leavepictureinpicture", () => { clearInterval(ovl.timer); v.remove(); if (ovl.video === v){ ovl.video = null; ovl.canvas = null; } renderVoiceBtns(); });
+      await v.requestPictureInPicture();
+      renderVoiceBtns();
+      return;
+    } catch(e){ console.warn("video PiP failed", e); closeOverlay(); }
+  }
+  flash("Overlay-ul nu e suportat în această aplicație. Deschide FolkChat în Chrome sau Edge pe PC ca să-l folosești.", true);
+}
+function renderOverlay(){
+  const who = ovlPeople();
+  if (!who){ if (overlayOpen()) closeOverlay(); return; }
+  if (!(ovl.win && !ovl.win.closed)) return;   // the canvas version redraws itself
+  const d = ovl.win.document;
+  const rows = who.list.map(p => {
+    const pr = P(p.id) || {}, av = avatar(p.id, "sm"); av.dataset.vu = p.id; if (voiceSpeaking.has(p.id)) av.classList.add("speaking");
+    return h("div",{class:"ovl-row"}, av, h("span",{class:"ovl-n",style:"color:" + accent(pr),text: pr.tag || "?"}),
+      p.deaf ? h("span",{title:"Sunet oprit",text:"🙉"}) : p.muted ? h("span",{title:"Microfon oprit",text:"🔇"}) : null);
+  });
+  const muted = voice.room ? voice.muted : call.muted;
+  d.body.replaceChildren(h("div",{class:"ovl"},
+    h("div",{class:"ovl-top"}, h("span",{class:"grow ovl-t",text:who.title}),
+      h("button",{type:"button",class:"ovl-b" + (muted ? " off" : ""),title: muted ? "Pornește microfonul" : "Oprește microfonul",text: muted ? "🔇" : "🎤",onclick:() => { if (voice.room) setVoiceFlags(!voice.muted, voice.deaf); else { call.muted = !call.muted; syncMic(); callUI(); } }})),
+    ...rows));
+}
+function drawOverlay(){
+  const c = ovl.canvas, who = ovlPeople(); if (!c) return;
+  if (!who){ closeOverlay(); return; }
+  const want = 120 + who.list.length * 76; if (c.height !== want) c.height = want;
+  const g = c.getContext("2d");
+  g.fillStyle = "#0e0f12"; g.fillRect(0, 0, c.width, c.height);
+  g.font = "600 30px system-ui, sans-serif"; g.fillStyle = "#9aa0aa"; g.textBaseline = "middle";
+  g.fillText(who.title, 28, 52);
+  who.list.forEach((p, i) => {
+    const y = 120 + i * 76, pr = P(p.id) || {}, talk = voiceSpeaking.has(p.id);
+    g.beginPath(); g.arc(56, y, 26, 0, Math.PI * 2); g.fillStyle = "#23262d"; g.fill();
+    if (talk){ g.lineWidth = 6; g.strokeStyle = "#3ef08a"; g.stroke(); }
+    g.font = "28px system-ui, sans-serif"; g.textAlign = "center"; g.fillStyle = "#fff"; g.fillText(pr.emoji || (pr.tag || "?")[0], 56, y + 2);
+    g.textAlign = "left"; g.font = (talk ? "700 " : "600 ") + "32px system-ui, sans-serif"; g.fillStyle = talk ? "#ffffff" : "#c9ccd3";
+    g.fillText((pr.tag || "?").slice(0, 18) + (p.deaf ? "  🙉" : p.muted ? "  🔇" : ""), 100, y + 2);
+  });
 }
 function playRemote(id, stream, deaf){
   let a = document.getElementById("ra-" + id);
@@ -1888,12 +2047,14 @@ function callUI(){
   const secs = call.started ? Math.floor((Date.now() - call.started) / 1000) : 0;
   const status = call.state === "active" ? "Conectat · " + z(Math.floor(secs / 60)) + ":" + z(secs % 60) : call.role === "caller" ? "Sună…" : "Se conectează…";
   const av = avatar(call.other,"sm"); av.dataset.vu = call.other;
-  bar.replaceChildren(av, h("div",{class:"grow",style:"min-width:0"}, h("b",{text:p.tag || "?"}), h("div",{class:"note",style:"font-size:12px",text:"📞 " + status})),
+  if (!bar.dataset.drag){ bar.dataset.drag = "1"; makeDraggable(bar, "fc:callbar"); }
+  bar.replaceChildren(...[h("span",{class:"drag-h",title:"Trage ca să muți (dublu-click: înapoi la loc)",text:"⠿"}), av, h("div",{class:"grow",style:"min-width:0"}, h("b",{text:p.tag || "?"}), h("div",{class:"note",style:"font-size:12px",text:"📞 " + status})),
     h("button",{type:"button",class:"icon" + (call.muted ? " off" : ""),title: call.muted ? "Pornește microfonul" : "Oprește microfonul","aria-label":"Microfon",text: call.muted ? "🔇" : "🎤",onclick:() => { call.muted = !call.muted; syncMic(); callUI(); }}),
     settings.voice.ptt ? pttButton() : null,
     h("button",{type:"button",class:"icon",title:"Volumul lui " + (p.tag || "?"),"aria-label":"Volum",text:"🔉",onclick:ev => userVolPop(call.other, ev.currentTarget)}),
-    h("button",{type:"button",class:"hang",title:"Închide","aria-label":"Închide apelul",text:"Închide",onclick:() => hangUp()}));
-  paintSpeaking(); renderChatHeader();
+    h("button",{type:"button",class:"icon" + (overlayOpen() ? " on" : ""),title:"Overlay peste joc (fereastră mică mereu deasupra)","aria-label":"Overlay",text:"🪟",onclick:toggleOverlay}),
+    h("button",{type:"button",class:"hang",title:"Închide","aria-label":"Închide apelul",text:"Închide",onclick:() => hangUp()})].filter(Boolean));
+  paintSpeaking(); renderChatHeader(); renderOverlay();
 }
 function newCallPC(){
   const pc = new RTCPeerConnection(RTC_CFG);
@@ -1922,7 +2083,7 @@ async function startCallTo(other){
   if (voice.room) await leaveVoice();
   const pair = D.dmId(other).slice(3);
   Object.assign(call, { pair, other, role: "caller", state: "ringing", stream, muted: false, started: 0, iceQ: [], unsubs: [] });
-  syncMic();
+  syncMic(); if (!voice.room) addMeter(uid, stream);
   presenceSet(true);
   try {
     call.pc = newCallPC();
@@ -1975,7 +2136,7 @@ async function answer(c){
   let stream; try { stream = await getMic(); } catch(e){ micAlert(e); D.endCall(c.id); return; }
   if (voice.room) await leaveVoice();
   Object.assign(call, { pair: c.id, other: c.caller, role: "callee", state: "connecting", stream, muted: false, started: 0, iceQ: [], unsubs: [] });
-  syncMic();
+  syncMic(); if (!voice.room) addMeter(uid, stream);
   presenceSet(true);
   try {
     call.pc = newCallPC();
@@ -1996,6 +2157,7 @@ function cleanupCall(){
   if (call.pc) try { call.pc.close(); } catch(e){}
   if (call.stream) call.stream.getTracks().forEach(t => t.stop());
   if (call.other) stopRemote(call.other);
+  if (!voice.room) removeMeter(uid);
   Object.assign(call, { pair: null, other: null, pc: null, stream: null, audio: null, role: null, state: null, unsubs: [], timer: null, tick: null, started: 0, iceQ: [] });
   presenceSet(!document.hidden);
   callUI();
@@ -2139,19 +2301,20 @@ function renderVoice(){
       })) : null);
   }), ...(voiceRooms.length ? [] : [h("div",{class:"note",style:"padding:4px 10px 8px;font-size:12.5px",text: isAdmin ? "Se creează canalul 🔊 General…" : "Niciun canal vocal încă."})]));
   const panel = $("voicePanel");
-  if (!voice.room){ panel.classList.add("hidden"); panel.replaceChildren(); paintSpeaking(); return; }
+  if (!voice.room){ panel.classList.add("hidden"); panel.replaceChildren(); paintSpeaking(); renderOverlay(); return; }
   const r = voiceRooms.find(x => x.id === voice.room) || { name: "?" };
   panel.classList.remove("hidden");
-  panel.replaceChildren(
+  panel.replaceChildren(...[
     h("div",{class:"vp-top"}, h("span",{class:"vp-dot"}), h("div",{class:"grow",style:"min-width:0"}, h("b",{class:"vp-ok",text:"Conectat la voce"}), h("div",{class:"note",style:"font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis",text:(r.emoji || "🔊") + " " + r.name + " · " + voice.peers.size + " conexiuni"}))),
     h("div",{class:"vp-btns"},
       h("button",{type:"button",class:voice.muted ? "off" : "",title:"Microfon",text:(voice.muted ? "🔇" : "🎤") + " Microfon",onclick:() => setVoiceFlags(!voice.muted, voice.deaf)}),
       h("button",{type:"button",class:voice.deaf ? "off" : "",title:"Sunet",text:(voice.deaf ? "🙉" : "🎧") + " Sunet",onclick:() => setVoiceFlags(voice.muted, !voice.deaf)}),
+      h("button",{type:"button",class:"vp-gear" + (overlayOpen() ? " on" : ""),title:"Overlay peste joc (fereastră mică mereu deasupra)","aria-label":"Overlay",text:"🪟",onclick:toggleOverlay}),
       h("button",{type:"button",class:"vp-gear",title:"Setări voce","aria-label":"Setări voce",text:"⚙",onclick:() => openSettings("voice")}),
       h("button",{type:"button",class:"hang",title:"Deconectare",text:"Deconectare",onclick:() => leaveVoice()})),
     settings.voice.ptt ? h("div",{class:"vp-btns",style:"margin-top:6px"}, pttButton()) : null,
-    h("div",{class:"note",style:"font-size:11.5px;margin-top:6px",text:"🎛️ " + nsLabel()}));
-  paintSpeaking();
+    h("div",{class:"note",style:"font-size:11.5px;margin-top:6px",text:"🎛️ " + nsLabel()})].filter(Boolean));
+  paintSpeaking(); renderOverlay();
 }
 
 // =========================== push notifications ===========================
