@@ -832,14 +832,53 @@ function renderChatHeader(){
     h("button",{type:"button",class:"icon dc-memtoggle",title:"Membri","aria-label":"Arată membrii",text:"👥",onclick:() => document.querySelector(".dc").classList.toggle("nomembers")})].filter(Boolean));
   $("chatIn").placeholder = dm ? "Mesaj către @" + (other ? other.tag : "") : c ? "Mesaj #" + c.name : "Alege o conversație";
   $("chatIn").disabled = !has; $("chatBtn").disabled = !has;
-  $("fmtHint").textContent = "**bold** *italic* __subliniat__ ~~tăiat~~ `cod` ||spoiler||" + (dm ? "" : " · @nume") + " · ↑ editează ultimul mesaj";
+  $("fmtHint").textContent = "**bold** *italic* __subliniat__ ~~tăiat~~ `cod` ||spoiler||" + " · @nume" + " · ↑ editează ultimul mesaj";
 }
 
 // ---------- rich text: **bold** *italic* __underline__ ~~strike~~ `code` ||spoiler|| links @mentions ----------
-const TAGRE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\|\|[^|\n]+\|\||`[^`\n]+`|\*[^*\n]+\*|https?:\/\/[^\s<]+|@[^\s@]+)/g;
+const TAGRE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\|\|[^|\n]+\|\||`[^`\n]+`|\*[^*\n]+\*|https?:\/\/[^\s<]+)/g;
+// @mentions: names can contain spaces ("Seba cel puternic"), so match the longest member name after each @
+let tagCache = { src: null, list: [] };
+function tagList(){
+  if (tagCache.src !== profiles){
+    const list = Object.keys(profiles).filter(id => P(id) && P(id).tag).map(id => ({ id, t: P(id).tag.toLowerCase() }));
+    list.push({ id: "everyone", t: "everyone" });
+    tagCache = { src: profiles, list: list.sort((a, b) => b.t.length - a.t.length) };
+  }
+  return tagCache.list;
+}
+function mentionAt(lower, i){   // lower[i] === "@"
+  if (i > 0 && !/[\s(]/.test(lower[i - 1])) return null;
+  for (const x of tagList()){
+    if (lower.startsWith(x.t, i + 1)){ const nx = lower[i + 1 + x.t.length]; if (nx === undefined || /[\s.,!?:;)]/.test(nx)) return { id: x.id, len: 1 + x.t.length }; }
+  }
+  return null;
+}
+function splitMentions(text){
+  const out = [], lower = text.toLowerCase(); let last = 0;
+  for (let i = text.indexOf("@"); i !== -1; i = text.indexOf("@", i + 1)){
+    const m = mentionAt(lower, i); if (!m) continue;
+    if (i > last) out.push({ t: text.slice(last, i) });
+    out.push({ t: text.slice(i, i + m.len), id: m.id });
+    last = i + m.len; i = last - 1;
+  }
+  if (last < text.length) out.push({ t: text.slice(last) });
+  return out;
+}
 function richText(text){
   const frag = document.createDocumentFragment();
-  const tags = {}; for (const id in profiles) tags[profiles[id].tag.toLowerCase()] = id;
+  for (const seg of splitMentions(String(text))){
+    if (seg.id){
+      const el = h("span",{class:"mention" + (seg.id === uid ? " me" : ""),text:seg.t});
+      if (seg.id !== "everyone") el.onclick = () => openProfile(seg.id);
+      frag.append(el); continue;
+    }
+    frag.append(richPlain(seg.t));
+  }
+  return frag;
+}
+function richPlain(text){
+  const frag = document.createDocumentFragment();
   for (const part of String(text).split(TAGRE)){
     if (!part) continue;
     let el = null;
@@ -854,22 +893,13 @@ function richText(text){
       el = document.createDocumentFragment();
       el.append(h("a",{href:clean,target:"_blank",rel:"noopener noreferrer nofollow",text:clean}), rest);
     }
-    else if (part.startsWith("@")){
-      const name = part.slice(1).toLowerCase().replace(/[.,!?:;]+$/,""), id = tags[name];
-      if (name === "everyone") el = h("span",{class:"mention",text:part});
-      else if (id){ el = h("span",{class:"mention" + (id === uid ? " me" : ""),text:part}); el.onclick = () => openProfile(id); }
-    }
     frag.append(el || document.createTextNode(part));
   }
   return frag;
 }
 function parseMentions(text){
   const ids = new Set(); let everyone = false;
-  const tags = {}; for (const id in profiles) tags[profiles[id].tag.toLowerCase()] = id;
-  for (const m of String(text).matchAll(/@([^\s@]+)/g)){
-    const n = m[1].toLowerCase().replace(/[.,!?:;]+$/,"");
-    if (n === "everyone") everyone = true; else if (tags[n]) ids.add(tags[n]);
-  }
+  for (const seg of splitMentions(String(text))) if (seg.id){ if (seg.id === "everyone") everyone = true; else ids.add(seg.id); }
   return { mentions: [...ids].slice(0, 25), everyone };
 }
 
@@ -993,21 +1023,23 @@ function renderTyping(){ $("typing").textContent = ""; }
 // ---------- composer: mentions autocomplete, send ----------
 let mentionPop = null, mentionSel = 0, mentionItems = [];
 function updateMentionPop(){
-  const ci = $("chatIn"), before = ci.value.slice(0, ci.selectionStart), m = isDmId(curCh) ? null : before.match(/(^|\s)@([^\s@]*)$/);
+  const ci = $("chatIn"), before = ci.value.slice(0, ci.selectionStart), m = before.match(/(^|[\s(])@([^@\n]{0,40})$/);
   if (!m){ closeMentionPop(); return; }
-  const q = m[2].toLowerCase();
-  mentionItems = Object.keys(profiles).filter(id => P(id).tag.toLowerCase().startsWith(q)).sort((a,b) => (online.has(b)-online.has(a)) || P(a).tag.localeCompare(P(b).tag)).slice(0, 7).map(id => ({ id, tag: P(id).tag }));
-  if ("everyone".startsWith(q)) mentionItems.push({ id:"everyone", tag:"everyone" });
+  const q = m[2].toLowerCase(), dm = isDmId(curCh);
+  const hit = id => { const t = P(id).tag.toLowerCase(); return t.startsWith(q) || (!q.includes(" ") && t.split(/\s+/).some(w => w.startsWith(q))); };
+  const pool = dm ? [dmOther(curCh)].filter(id => P(id)) : Object.keys(profiles).filter(id => id !== uid && P(id));
+  mentionItems = pool.filter(hit).sort((a,b) => (P(a).tag.toLowerCase().startsWith(q) ? 0 : 1) - (P(b).tag.toLowerCase().startsWith(q) ? 0 : 1) || (online.has(b)-online.has(a)) || P(a).tag.localeCompare(P(b).tag)).slice(0, 8).map(id => ({ id, tag: P(id).tag }));
+  if (!dm && "everyone".startsWith(q)) mentionItems.push({ id:"everyone", tag:"everyone" });
   if (!mentionItems.length){ closeMentionPop(); return; }
   mentionSel = Math.min(mentionSel, mentionItems.length - 1);
   if (!mentionPop){ mentionPop = h("div",{class:"mention-pop"}); $("composerWrap").append(mentionPop); }
-  mentionPop.replaceChildren(h("div",{class:"h2",style:"margin:4px 6px 6px",text:"Membri"}), ...mentionItems.map((it, i) => h("div",{class:"mp-item" + (i === mentionSel ? " on" : ""),onmousedown:e => { e.preventDefault(); pickMention(i); }},
+  mentionPop.replaceChildren(h("div",{class:"h2",style:"margin:4px 6px 6px",text:"Membri"}), ...mentionItems.map((it, i) => h("div",{class:"mp-item" + (i === mentionSel ? " on" : ""),onpointerdown:e => { e.preventDefault(); pickMention(i); },onmousedown:e => e.preventDefault()},
     it.id === "everyone" ? h("span",{class:"av sm",text:"📣"}) : avatar(it.id,"sm"), h("b",{text:it.tag}), it.id === "everyone" ? h("span",{class:"note",text:" anunță pe toată lumea"}) : online.has(it.id) ? h("span",{class:"note",text:" online"}) : null)));
 }
 function closeMentionPop(){ if (mentionPop){ mentionPop.remove(); mentionPop = null; } mentionSel = 0; }
 function pickMention(i){
   const ci = $("chatIn"), it = mentionItems[i]; if (!it) return;
-  const pos = ci.selectionStart, before = ci.value.slice(0, pos).replace(/@([^\s@]*)$/, "@" + it.tag + " ");
+  const pos = ci.selectionStart, before = ci.value.slice(0, pos).replace(/@([^@\n]*)$/, "@" + it.tag + " ");
   ci.value = before + ci.value.slice(pos); ci.setSelectionRange(before.length, before.length);
   closeMentionPop(); ci.focus();
 }
