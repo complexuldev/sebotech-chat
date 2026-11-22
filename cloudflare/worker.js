@@ -36,6 +36,7 @@ export default {
       if (req.method === "POST" && url.pathname === "/upload") return await upload(req, env, url, cors);
       if (req.method === "DELETE" && url.pathname.startsWith("/m/")) return await remove(req, env, url, cors);
       if (req.method === "POST" && url.pathname === "/notify") return await notify(req, env, cors, ctx);
+      if (req.method === "GET" && url.pathname === "/stats") return await stats(req, env, cors);
       return json({ error: "not found" }, 404, cors);
     } catch (e) {
       const status = e.status || 500;
@@ -220,7 +221,7 @@ async function serviceToken(env) {
   const head = strToB64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const claim = strToB64url(JSON.stringify({
     iss: env.SA_CLIENT_EMAIL, aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600,
-    scope: "https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/datastore"
+    scope: "https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/monitoring.read"
   }));
   const pem = String(env.SA_PRIVATE_KEY).replace(/\\n/g, "\n").replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
   const key = await crypto.subtle.importKey("pkcs8", Uint8Array.from(atob(pem), c => c.charCodeAt(0)), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
@@ -292,4 +293,68 @@ async function notify(req, env, cors, ctx) {
     }
   }));
   return json({ sent }, 200, cors);
+}
+
+// ---------------- usage dashboard (admin only) ----------------
+// Cloudflare: exact R2 storage, counted by listing the bucket (cached 5 min, ~1 list call per 1000 files).
+// Firebase: today's document reads/writes/deletes from Google Cloud Monitoring (needs the service account
+// secrets + the "Monitoring Viewer" role). The free Firestore quota resets at midnight Pacific time.
+let r2Cache = null, fsCache = null;
+async function stats(req, env, cors) {
+  const user = await verifyIdToken(req, env);
+  const me = await requireMember(env, user);
+  if (me.role !== "admin") throw fail(403, "admin only");
+  const fresh = new URL(req.url).searchParams.get("fresh") === "1";
+  const out = { at: Date.now(), r2: await r2Usage(env, fresh), firestore: null };
+  try { out.firestore = await fsUsage(env, fresh); }
+  catch (e) { out.firestore = { error: e.message || "error", status: e.status || 500 }; }
+  return json(out, 200, cors);
+}
+async function r2Usage(env, fresh) {
+  if (!fresh && r2Cache && Date.now() - r2Cache.at < 300000) return r2Cache;
+  const cat = { video: { n: 0, b: 0 }, voice: { n: 0, b: 0 }, image: { n: 0, b: 0 } };
+  let cursor = undefined, total = 0, n = 0, lists = 0;
+  do {
+    const l = await env.MEDIA.list({ cursor, limit: 1000 }); lists++;
+    for (const o of l.objects) {
+      const c = o.key.startsWith("v-") ? "video" : /\.(weba|ogg|m4a)$/.test(o.key) ? "voice" : "image";
+      cat[c].n++; cat[c].b += o.size; total += o.size; n++;
+    }
+    cursor = l.truncated ? l.cursor : undefined;
+  } while (cursor && lists < 100);
+  r2Cache = { at: Date.now(), bytes: total, count: n, ...cat, limitBytes: 10 * 1024 * 1024 * 1024 };
+  return r2Cache;
+}
+function quotaDayStart() {   // midnight in Los Angeles = when Firebase's free daily quota resets
+  const now = new Date();
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(now);
+  const g = t => Number((p.find(x => x.type === t) || {}).value || 0);
+  return new Date((Math.floor(now.getTime() / 1000) - ((g("hour") % 24) * 3600 + g("minute") * 60 + g("second"))) * 1000);
+}
+async function fsUsage(env, fresh) {
+  if (!fresh && fsCache && Date.now() - fsCache.at < 60000) return fsCache;
+  if (!env.SA_CLIENT_EMAIL || !env.SA_PRIVATE_KEY) throw fail(501, "not configured");
+  const tok = await serviceToken(env);
+  const end = new Date(), start = quotaDayStart();
+  const sum = async (metric, from, periodS) => {
+    const u = new URL("https://monitoring.googleapis.com/v3/projects/" + env.FIREBASE_PROJECT_ID + "/timeSeries");
+    u.searchParams.set("filter", 'metric.type="firestore.googleapis.com/document/' + metric + '"');
+    u.searchParams.set("interval.startTime", from.toISOString());
+    u.searchParams.set("interval.endTime", end.toISOString());
+    u.searchParams.set("aggregation.alignmentPeriod", Math.max(60, Math.floor(periodS)) + "s");
+    u.searchParams.set("aggregation.perSeriesAligner", "ALIGN_SUM");
+    u.searchParams.set("aggregation.crossSeriesReducer", "REDUCE_SUM");
+    const r = await fetch(u, { headers: { Authorization: "Bearer " + tok } });
+    if (!r.ok) throw fail(r.status === 403 ? 403 : 502, r.status === 403 ? "missing Monitoring Viewer role" : "monitoring " + r.status);
+    const j = await r.json(); let t = 0;
+    for (const ts of j.timeSeries || []) for (const pt of ts.points || []) t += Number(pt.value.int64Value || pt.value.doubleValue || 0);
+    return t;
+  };
+  const span = (end - start) / 1000, week = new Date(end.getTime() - 7 * 86400000);
+  const [reads, writes, deletes, r7, w7, d7] = await Promise.all([
+    sum("read_count", start, span), sum("write_count", start, span), sum("delete_count", start, span),
+    sum("read_count", week, 7 * 86400), sum("write_count", week, 7 * 86400), sum("delete_count", week, 7 * 86400)]);
+  fsCache = { at: Date.now(), since: start.getTime(), resetAt: start.getTime() + 86400000, reads, writes, deletes,
+              limits: { reads: 50000, writes: 20000, deletes: 20000 }, week: { reads: r7, writes: w7, deletes: d7 } };
+  return fsCache;
 }
