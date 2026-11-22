@@ -280,10 +280,17 @@ async function notify(req, env, cors, ctx) {
   let sent = 0;
   await Promise.all(targets.map(async uid => {
     const t = await fsGet(env, "tokens/" + uid, sa);
-    for (const token of ((t && t.list) || []).slice(-10)) {
+    for (const saved of ((t && t.list) || []).slice(-10)) {
+      // "c2:" tokens = the newer Android app: it rings full-screen for calls, so calls go to it as a
+      // data-only message (its own code shows the call screen with Answer / Decline).
+      const c2 = String(saved).startsWith("c2:"), token = c2 ? String(saved).slice(3) : String(saved);
+      const message = c2 && msg.data.type === "call"
+        ? { token, data: Object.assign({}, msg.data, { title: msg.title, body: msg.body, from: clip(me.tag, 24) || "Cineva" }),
+            android: { priority: "HIGH", ttl: "30s" } }
+        : null;
       const r = await fetch("https://fcm.googleapis.com/v1/projects/" + env.FIREBASE_PROJECT_ID + "/messages:send", {
         method: "POST", headers: { Authorization: "Bearer " + sa, "Content-Type": "application/json" },
-        body: JSON.stringify({ message: {
+        body: JSON.stringify({ message: message || {
           token,
           notification: { title: msg.title, body: msg.body },
           data: msg.data,
