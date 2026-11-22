@@ -2,7 +2,7 @@
 <html lang="ro">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://api.klipy.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.workers.dev https://www.gstatic.com; media-src 'self' blob:; worker-src 'self'; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.klipy.com https://*.googleusercontent.com https://*.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://api.klipy.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.workers.dev https://www.gstatic.com; media-src 'self' blob: https://*.workers.dev; worker-src 'self'; frame-src https://*.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.klipy.com https://*.googleusercontent.com https://*.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0b0b0f">
@@ -537,6 +537,27 @@
   .pt-bar{height:5px;border-radius:99px;background:var(--panel3);margin:5px 0 3px;overflow:hidden}
   .pt-bar i{display:block;height:100%;background:linear-gradient(90deg,#22c55e,#4ade80);border-radius:99px}
   button.danger{border-color:rgba(244,63,94,.5);color:#fb7185}
+  /* voice messages + video */
+  .composer-wrap{position:relative}
+  .composer-wrap.recording .composer{visibility:hidden}
+  .rec-bar{position:absolute;left:14px;right:14px;bottom:8px;top:auto;height:52px;display:flex;align-items:center;gap:10px;padding:0 6px 0 8px;background:var(--panel2);border:1px solid rgba(244,63,94,.5);border-radius:24px;z-index:5}
+  @media (max-width:760px){ .rec-bar{left:8px;right:8px;bottom:8px;height:46px} }
+  .rec-dot{width:10px;height:10px;border-radius:50%;background:#f43f5e;box-shadow:0 0 10px #f43f5e;animation:recpulse 1s infinite;flex:none}
+  @keyframes recpulse{50%{opacity:.35}}
+  .rec-t{font-variant-numeric:tabular-nums;font-size:14px;flex:none}
+  .rec-wave{flex:1;min-width:0;height:28px;display:flex;align-items:center;gap:2px;overflow:hidden;justify-content:flex-end}
+  .rec-wave i{display:block;width:3px;flex:none;border-radius:2px;background:#f43f5e}
+  .rec-send{width:40px;height:40px;border-radius:50% !important;padding:0;flex:none;font-size:16px}
+  .rec-x{flex:none}
+  .vm{display:flex;align-items:center;gap:10px;padding:8px 12px 8px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:22px;width:min(340px,100%)}
+  .vm-play{width:36px;height:36px;border-radius:50% !important;padding:0;flex:none;background:var(--accent) !important;border-color:var(--accent) !important;color:#fff;font-size:14px}
+  .vm-wave{flex:1;min-width:0;height:30px;display:flex;align-items:center;gap:2px;cursor:pointer}
+  .vm-wave i{display:block;flex:1;max-width:4px;border-radius:2px;background:var(--muted);opacity:.55}
+  .vm-wave i.on{background:var(--accent);opacity:1}
+  .vm-t{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;flex:none;min-width:32px;text-align:right}
+  .vm-spd{padding:2px 6px;font-size:11px;border-radius:8px;flex:none}
+  video.att.vid{max-width:min(420px,100%);max-height:360px;background:#000;border-radius:10px;display:block}
+  .prev-vid{width:64px;height:48px;object-fit:cover;border-radius:6px;background:#000}
   /* screen share */
   .stage{position:fixed;z-index:75;right:16px;bottom:16px;width:min(560px,calc(100vw - 24px));height:340px;min-width:240px;min-height:170px;display:flex;flex-direction:column;background:#000;border:1px solid var(--line);border-radius:14px;overflow:hidden;resize:both;box-shadow:0 20px 60px rgba(0,0,0,.6);touch-action:none}
   .stage-top{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel);font-size:13px;cursor:grab;user-select:none}
@@ -705,9 +726,10 @@
             <div class="replybar hidden" id="replyBar"></div>
             <div class="attprev hidden" id="chatPrev"></div>
             <form class="composer" id="chatForm">
-              <button type="button" class="icon" id="chatAttach" title="Atașează o imagine" aria-label="Atașează o imagine">📎</button>
+              <button type="button" class="icon" id="chatAttach" title="Atașează o imagine sau un video" aria-label="Atașează o imagine sau un video">📎</button>
               <textarea id="chatIn" rows="1" maxlength="2000" placeholder="Scrie un mesaj…"></textarea>
               <button type="button" class="icon gif-btn" id="chatGif" title="Trimite un GIF" aria-label="Trimite un GIF">GIF</button>
+              <button type="button" class="icon" id="chatVoice" title="Mesaj vocal" aria-label="Înregistrează un mesaj vocal">🎙️</button>
               <button class="primary" type="submit" id="chatBtn">Trimite</button>
             </form>
             <div class="fmt-hint note" id="fmtHint"></div>
@@ -808,6 +830,6 @@
 
 <div id="overlay" class="overlay hidden"></div>
 
-<script type="module" src="app.js?v=22"></script>
+<script type="module" src="app.js?v=23"></script>
 </body>
 </html>
