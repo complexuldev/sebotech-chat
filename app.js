@@ -2,7 +2,7 @@
 import * as D from "./data.js";
 import { OWNER_EMAIL, KLIPY_KEY } from "./config.js";
 
-const EMOJIS = ["🦙","🪂","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
+const EMOJIS = ["😎","🐱","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
 const COLORS = ["#00e5ff","#a855f7","#ff4d6d","#ffd23f","#3ef08a","#ff9f43","#5b6cff","#ff6ad5","#ffffff"];
 const BANNERS = {
   neon:"linear-gradient(120deg,#a855f7,#00e5ff)", storm:"linear-gradient(120deg,#3b1d6e,#7b2ff7 50%,#c084fc)",
@@ -10,11 +10,7 @@ const BANNERS = {
   ice:"linear-gradient(120deg,#0b3d91,#5bc0ff 60%,#e0f7ff)", lava:"linear-gradient(120deg,#2a0a0a,#c1121f 55%,#ff9f43)",
   midnight:"linear-gradient(120deg,#0f1220,#252b4d 60%,#5b6cff)", gold:"linear-gradient(120deg,#5c4400,#ffd23f 60%,#fff3b0)"
 };
-const PLATFORMS = ["PC","PlayStation","Xbox","Switch","Mobile"];
-const MODES = ["Battle Royale","Zero Build","Ranked","Reload","Creative","Duos","Squads","Arena"];
 const REACTS = [["fire","🔥"],["skull","💀"],["trophy","🏆"],["lol","😂"],["goat","🐐"]];
-const FIELDS = [["wins","Victorii"],["kills","Kill-uri"],["chests","Cufere"],["matches","Meciuri"]];
-const ZERO = () => ({wins:0,kills:0,chests:0,matches:0});
 const ONLINE_MS = 150000, TYPING_MS = 8000;
 
 const $ = id => document.getElementById(id);
@@ -54,10 +50,10 @@ function ago(ts){
 // state
 let uid = null, email = null, isAdmin = false, started = false;
 let profiles = {}, me = null;
-let posts = [], totals = {}, dayStats = {}, presence = [], keys = [];
+let posts = [], presence = [], keys = [];
 let online = new Set(), typingUids = new Set();
-let view = "chat", statDay = todayKey();
-let unsubDay = null, unsubs = [];
+let view = "chat";
+let unsubs = [];
 const openReplies = new Map();
 let prefillKey = "";
 
@@ -71,7 +67,7 @@ function avatar(id, size){
   if (online.has(id)) el.append(h("span",{class:"dot",title:"Online"}));
   return el;
 }
-function nameEl(id, tag){ const p = P(id); return h(tag || "b",{style:"color:"+accent(p), onclick:()=>openProfile(id), text:(p && p.tag) || "Unknown"}); }
+function nameEl(id, tag){ const p = P(id); return h(tag || "b",{style:"color:"+accent(p), onclick:()=>openProfile(id), text:(p && p.tag) || "Necunoscut"}); }
 const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
 function withMentions(text){
   const frag = document.createDocumentFragment();
@@ -146,7 +142,6 @@ function fillSelect(sel, opts, val){ sel.replaceChildren(...opts.map(o => h("opt
 function showGate(msg){
   showScreen("gate");
   $("gateEmail").textContent = email;
-  fillSelect($("platIn"), PLATFORMS);
   emojiPicker($("gateEmoji"), () => gateEmoji, e => gateEmoji = e);
   if (prefillKey) $("keyIn").value = prefillKey;
   $("gateErr").textContent = msg || "";
@@ -156,10 +151,10 @@ $("gateForm").addEventListener("submit", async ev => {
   const err = $("gateErr"); err.textContent = "";
   const key = $("keyIn").value.trim().toUpperCase(), tag = $("tagIn").value.trim();
   if (!/^SEBO-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) return err.textContent = "Asta nu arată a cheie. Ar trebui să arate așa: SEBO-XXXX-XXXX-XXXX.";
-  if (!tag) return err.textContent = "Alege un gamertag.";
+  if (!tag) return err.textContent = "Alege un nume.";
   const btn = $("gateBtn"); btn.disabled = true; btn.textContent = "Verific cheia…";
   try {
-    await D.join(key, { tag: tag.slice(0,24), emoji: gateEmoji, platform: $("platIn").value, bio:"", color: COLORS[Math.floor(Math.random()*COLORS.length)], banner:"neon", mode:"Battle Royale", drop:"", main:"", status:"", lfg:false });
+    await D.join(key, { tag: tag.slice(0,24), emoji: gateEmoji, bio:"", color: COLORS[Math.floor(Math.random()*COLORS.length)], banner:"neon", status:"" });
     startApp();
   } catch(e){
     err.textContent = D.errCode(e) === "permission-denied" ? "Cheia nu merge sau a fost deja folosită. Fiecare cheie merge o singură dată." : "Ceva n-a mers (" + D.errCode(e) + "). Încearcă din nou.";
@@ -187,16 +182,14 @@ function startApp(){
   initChat();
 
   unsubs.push(D.watchPosts(list => { posts = list.sort((a,b)=>b.ts-a.ts); renderFeed(); }, () => $("feedList").replaceChildren(h("div",{class:"empty",text:"Postările nu s-au putut încărca."}))));
-  unsubs.push(D.watchTotals(t => { totals = t; renderStats(); renderSquad(); }));
   unsubs.push(D.watchPresence(list => { presence = list; computeOnline(); }));
   setInterval(computeOnline, 15000);
 
   // heartbeat
-  D.setPresence(false, curCh).catch(()=>{});
-  setInterval(() => { if (!document.hidden) D.setPresence(typingNow, curCh).catch(()=>{}); }, 60000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) D.setPresence(false, curCh).catch(()=>{}); });
+  D.setPresence(false, pubCh()).catch(()=>{});
+  setInterval(() => { if (!document.hidden) D.setPresence(typingNow, pubCh()).catch(()=>{}); }, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) D.setPresence(false, pubCh()).catch(()=>{}); });
 
-  openStatDay(statDay);
   bindUi();
 }
 function startAdmin(){
@@ -225,7 +218,7 @@ function computeOnline(){
 }
 
 // routing
-const VIEWS = ["chat","feed","squad","stats","me"];
+const VIEWS = ["chat","feed","squad","me"];
 function route(){
   const v = (location.hash || "#chat").slice(1);
   view = VIEWS.includes(v) ? v : "chat";
@@ -241,8 +234,6 @@ let uiBound = false;
 function bindUi(){
   if (uiBound) return; uiBound = true;
   $("meChip").onclick = () => openProfile(uid);
-  $("prevDay").onclick = () => openStatDay(shiftDay(statDay,-1));
-  $("nextDay").onclick = () => { if (statDay < todayKey()) openStatDay(shiftDay(statDay,1)); };
 
   bindChat();
   $("dcScrim").onclick = closeDrawer;
@@ -263,18 +254,26 @@ function bindUi(){
   $("meForm").addEventListener("submit", saveMe);
   $("newKeyForm").addEventListener("submit", async ev => {
     ev.preventDefault();
+    const n = Math.max(1, Math.min(200, parseInt($("newKeyCount").value, 10) || 1));
+    const btn = $("newKeyBtn"); btn.disabled = true; btn.textContent = "Se generează…";
     try {
-      const k = await D.createKey($("newKeyLabel").value.trim().slice(0,40) || "Cheie extra");
+      const made = await D.createKeys(n, $("newKeyLabel").value.trim().slice(0,30) || "Cheie");
       $("newKeyLabel").value = "";
-      $("newKeyOut").replaceChildren(h("p",{class:"note",style:"margin:12px 0 0",text:"Cheie nouă. Copiaz-o acum, nu va mai fi afișată:"}), keyLine(k, "Nouă"));
+      const all = made.map(m => m.key).join("\n");
+      $("newKeyOut").replaceChildren(
+        h("div",{class:"row",style:"margin:14px 0 4px"},
+          h("p",{class:"note grow",style:"margin:0",text: made.length === 1 ? "Cheie nouă. Copiaz-o acum, nu va mai fi afișată:" : made.length + " chei noi. Copiază-le acum, nu vor mai fi afișate:"}),
+          made.length > 1 ? h("button",{class:"tiny",type:"button",text:"Copiază toate",onclick:ev => { const b = ev.currentTarget; navigator.clipboard.writeText(all).then(() => b.textContent = "Copiate ✓", () => b.textContent = "Selectează și copiază"); }}) : null),
+        ...made.map(m => keyLine(m.key, m.label)));
     } catch(e){ writeErr(e); }
+    finally { btn.disabled = false; btn.textContent = "Generează"; }
   });
   $("overlay").addEventListener("click", e => { if (e.target.id === "overlay") closeProfile(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeProfile(); });
 }
 
 function renderAll(){
-  renderMeChip(); renderChatAll(); renderFeed(); renderSquad(); renderStats(); renderKeys();
+  renderMeChip(); renderChatAll(); renderFeed(); renderSquad(); renderKeys();
   if (view === "me") renderPreview();
   if (openId){ if (P(openId)) openProfile(openId); else closeProfile(); }
 }
@@ -398,7 +397,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeGifPick
 // ================= SETTINGS (stored on this device) =================
 const DEFAULT_SETTINGS = {
   theme: "dark", accent: "#8b7cff", fontSize: 15, compact: false, h24: true, reduceMotion: false, showAvatars: true,
-  sound: true, volume: 0.6, sfx: { msg: true, mention: true, send: true, join: false, react: true },
+  sound: true, volume: 0.6, sfx: { msg: true, mention: true, dm: true, send: true, join: false, react: true },
   notify: false, notifyAll: false, muted: {}
 };
 let settings = loadSettings();
@@ -433,6 +432,7 @@ const SFX = {
   send:    { type:"sine",     notes:[[740,.05],[988,.07]] },
   msg:     { type:"triangle", notes:[[523,.06],[659,.09]] },
   mention: { type:"triangle", notes:[[880,.07],[1175,.07],[1568,.14]] },
+  dm:      { type:"sine",     notes:[[784,.07],[1047,.07],[784,.06],[1319,.12]] },
   join:    { type:"sine",     notes:[[392,.08],[587,.12]] },
   react:   { type:"sine",     notes:[[1046,.05]] },
   test:    { type:"triangle", notes:[[659,.06],[784,.06],[988,.1]] }
@@ -458,7 +458,12 @@ function playSfx(name, force){
 
 // ================= CHANNELS / MESSAGES =================
 const MSG_RX = [["like","👍"],["heart","❤️"],["laugh","😂"],["wow","😮"],["sad","😢"],["fire","🔥"],["skull","💀"],["goat","🐐"]];
-let channels = [], curCh = null;
+let channels = [], curCh = null, dms = [];
+const isDmId = cid => String(cid || "").startsWith("dm:");
+const dmOther = cid => (String(cid).slice(3).split("_").find(x => x !== uid)) || uid;
+const pubCh = () => isDmId(curCh) ? "" : (curCh || "");   // DMs are never announced in presence
+const pings = (m, cid) => isDmId(cid) ? m.uid !== uid : isMentioned(m);
+const convName = cid => isDmId(cid) ? "@" + ((P(dmOther(cid)) || {}).tag || "?") : "#" + ((channels.find(c => c.id === cid) || {}).name || "");
 const chMsgs = {};          // cid -> messages (ascending)
 const chUnsub = {};         // cid -> unsubscribe
 const chFirst = {};         // cid -> first snapshot received
@@ -475,25 +480,26 @@ function initChat(){
   unsubs.push(D.watchChannels(list => {
     channels = list.sort((a,b) => (a.pos||0) - (b.pos||0));
     for (const c of channels) if (!chUnsub[c.id]) chUnsub[c.id] = D.watchMsgs(c.id, 80, msgs => onMsgs(c.id, msgs), () => {});
-    for (const id of Object.keys(chUnsub)) if (!channels.find(c => c.id === id)){ chUnsub[id](); delete chUnsub[id]; delete chMsgs[id]; }
-    if (!curCh || !channels.find(c => c.id === curCh)){
-      let want = null; try { want = localStorage.getItem("sebo:ch"); } catch(e){}
-      curCh = (channels.find(c => c.id === want) || channels[0] || {}).id || null;
-    }
-    if (isAdmin && !channels.length) ensureDefaultChannels();
+    for (const id of Object.keys(chUnsub)) if (!isDmId(id) && !channels.find(c => c.id === id)){ chUnsub[id](); delete chUnsub[id]; delete chMsgs[id]; }
+    chReady = true; ensureCur();
     renderChannels(); renderChatHeader(); renderMsgs(true);
+  }));
+  unsubs.push(D.watchDms(list => {
+    dms = list.sort((a,b) => b.last - a.last);
+    for (const c of dms) if (!chUnsub[c.id]) chUnsub[c.id] = D.watchMsgs(c.id, 80, msgs => onMsgs(c.id, msgs), () => {});
+    dmReady = true; ensureCur();
+    renderChannels(); renderChatHeader(); renderMsgs(false); renderChatBadge();
   }));
   document.addEventListener("visibilitychange", () => { if (!document.hidden) markRead(); });
   window.addEventListener("focus", markRead);
 }
-let defaultsMade = false;
-async function ensureDefaultChannels(){
-  if (defaultsMade) return; defaultsMade = true;
-  try {
-    await D.createChannel({ name:"general", emoji:"💬", topic:"Chat general pentru toată echipa", pos:1 });
-    await D.createChannel({ name:"clipuri", emoji:"🎬", topic:"Faze, clipuri și screenshot-uri", pos:2 });
-    await D.createChannel({ name:"lfg", emoji:"🎮", topic:"Cine intră în joc?", pos:3 });
-  } catch(e){ defaultsMade = false; }
+let chReady = false, dmReady = false;
+function ensureCur(){
+  const ok = cid => cid && (isDmId(cid) ? cid.slice(3).split("_").includes(uid) : channels.some(c => c.id === cid));
+  if (ok(curCh)) return;
+  let want = null; try { want = localStorage.getItem("sebo:ch"); } catch(e){}
+  if (!chReady || !dmReady){ if (isDmId(want) && ok(want)) curCh = want; return; }
+  curCh = ok(want) ? want : ((dms[0] || channels[0] || {}).id || null);
 }
 function onMsgs(cid, list){
   const prev = chMsgs[cid] || [];
@@ -504,7 +510,8 @@ function onMsgs(cid, list){
       if (prevIds.has(m.id) || m.uid === uid || Date.now() - m.ts > 60000) continue;
       const muted = settings.muted[cid];
       const here = cid === curCh && view === "chat" && !document.hidden;
-      if (isMentioned(m)){ playSfx("mention"); notifyDesktop(m, cid, true); }
+      if (isDmId(cid)){ if (!muted){ playSfx("dm"); notifyDesktop(m, cid, true); } }
+      else if (isMentioned(m)){ playSfx("mention"); notifyDesktop(m, cid, true); }
       else if (!muted){ if (!here || settings.sfx.msg) playSfx("msg"); if (settings.notifyAll) notifyDesktop(m, cid, false); }
     }
   }
@@ -515,7 +522,7 @@ function onMsgs(cid, list){
 function unreadInfo(cid){
   const lr = lastRead[cid] || 0, list = chMsgs[cid] || [];
   let unread = false, mentions = 0;
-  for (const m of list) if (m.ts > lr && m.uid !== uid){ unread = true; if (isMentioned(m)) mentions++; }
+  for (const m of list) if (m.ts > lr && m.uid !== uid){ unread = true; if (pings(m, cid) && !(isDmId(cid) && settings.muted[cid])) mentions++; }
   return { unread, mentions };
 }
 function markRead(){
@@ -526,7 +533,7 @@ function markRead(){
 }
 function renderChatBadge(){
   let mentions = 0, anyUnread = false;
-  for (const c of channels){ const u = unreadInfo(c.id); mentions += u.mentions; if (u.unread && !settings.muted[c.id]) anyUnread = true; }
+  for (const c of channels.concat(dms)){ const u = unreadInfo(c.id); mentions += u.mentions; if (u.unread && !settings.muted[c.id]) anyUnread = true; }
   const b = $("chatBadge");
   b.textContent = mentions ? (mentions > 99 ? "99+" : String(mentions)) : "";
   b.classList.toggle("hidden", !mentions && !anyUnread);
@@ -535,9 +542,9 @@ function renderChatBadge(){
 }
 function notifyDesktop(m, cid, mention){
   if (!settings.notify || !("Notification" in window) || Notification.permission !== "granted" || !document.hidden) return;
-  const p = P(m.uid) || {}, ch = channels.find(c => c.id === cid) || {};
+  const p = P(m.uid) || {};
   try {
-    const n = new Notification((mention ? "@ " : "") + (p.tag || "Cineva") + " · #" + (ch.name || ""), { body: m.text ? m.text.slice(0, 140) : (m.img ? "🖼️ imagine" : "🎞️ GIF"), tag: "sebo-" + cid, silent: true });
+    const n = new Notification(isDmId(cid) ? "💬 " + (p.tag || "Cineva") + " (mesaj privat)" : (mention ? "@ " : "") + (p.tag || "Cineva") + " · " + convName(cid), { body: m.text ? m.text.slice(0, 140) : (m.img ? "🖼️ imagine" : "🎞️ GIF"), tag: "sebo-" + cid, silent: true });
     n.onclick = () => { window.focus(); location.hash = "#chat"; selectChannel(cid); n.close(); };
   } catch(e){}
 }
@@ -560,9 +567,45 @@ function renderChannels(){
       h("span",{class:"ch-name grow",text:c.name}),
       u.mentions ? h("span",{class:"badge",text:String(u.mentions)}) : null,
       isAdmin ? h("button",{type:"button",class:"ch-edit",title:"Editează canalul","aria-label":"Editează canalul",text:"⚙",onclick:ev => { ev.stopPropagation(); channelModal(c); }}) : null);
-  }), ...(channels.length ? [] : [h("div",{class:"note",style:"padding:8px 10px",text: isAdmin ? "Se creează canalele…" : "Niciun canal încă."})]));
+  }), ...(channels.length ? [] : isAdmin ? [h("div",{class:"note",style:"padding:4px 10px 8px;font-size:12.5px",text:"Niciun canal. Apasă ＋ dacă vrei unul pentru toată lumea."})] : []));
   $("chAdd").classList.toggle("hidden", !isAdmin);
+  $("chSection").classList.toggle("hidden", !isAdmin && !channels.length);
+  // DMs: existing conversations + the one you just opened (if it has no messages yet)
+  const list = dms.filter(c => profiles[c.other]);
+  if (isDmId(curCh) && !list.some(c => c.id === curCh) && profiles[dmOther(curCh)]) list.unshift({ id: curCh, other: dmOther(curCh), last: Date.now() });
+  $("dmList").replaceChildren(...list.map(c => {
+    const u = unreadInfo(c.id), muted = !!settings.muted[c.id], p = P(c.other);
+    const lastMsg = (chMsgs[c.id] || []).slice(-1)[0];
+    const prev = lastMsg ? (lastMsg.uid === uid ? "Tu: " : "") + (lastMsg.text || (lastMsg.img ? "🖼️ imagine" : "🎞️ GIF")) : "Conversație nouă";
+    return h("div",{class:"ch dm" + (c.id === curCh ? " on" : "") + (u.unread && !muted ? " unread" : "") + (muted ? " muted" : ""), onclick:() => selectChannel(c.id)},
+      avatar(c.other,"sm"),
+      h("div",{class:"grow",style:"min-width:0"}, h("div",{class:"ch-name",text:p.tag}), h("div",{class:"dm-prev",text:prev})),
+      u.mentions ? h("span",{class:"badge",text:String(u.mentions)}) : null);
+  }), ...(list.length ? [] : [h("div",{class:"note",style:"padding:4px 10px 8px;font-size:12.5px",text:"Niciun mesaj privat încă. Apasă ＋ sau 💬 lângă un membru."})]));
   renderUserPanel();
+}
+function openDm(id){
+  if (!profiles[id] || id === uid) return;
+  closeProfile();
+  if (location.hash !== "#chat") location.hash = "#chat";
+  selectChannel(D.dmId(id));
+}
+function dmPicker(){
+  const q = h("input",{placeholder:"Caută un membru…",type:"search"});
+  const box = h("div",{class:"dm-pick"});
+  const draw = () => {
+    const t = q.value.trim().toLowerCase();
+    const ids = Object.keys(profiles).filter(id => id !== uid && P(id).tag.toLowerCase().includes(t)).sort((a,b) => (online.has(b)-online.has(a)) || P(a).tag.localeCompare(P(b).tag));
+    box.replaceChildren(...(ids.length ? ids.map(id => h("div",{class:"mem",onclick:() => openDm(id)}, avatar(id,"sm"), h("div",{class:"grow"}, h("div",{class:"mem-n",style:"color:" + accent(P(id)),text:P(id).tag}), h("div",{class:"mem-s",text: online.has(id) ? "online" : "offline"})))) : [h("div",{class:"note",style:"padding:10px",text:"Nimeni găsit."})]));
+  };
+  q.addEventListener("input", draw); draw();
+  openModal(h("div",{class:"modal small"},
+    h("button",{class:"close",type:"button","aria-label":"Închide",text:"✕",onclick:closeProfile}),
+    h("div",{class:"bd",style:"margin-top:0;padding-top:20px"},
+      h("h3",{style:"margin:0 0 4px",text:"Mesaj privat nou"}),
+      h("p",{class:"note",style:"margin:0 0 10px",text:"Doar tu și persoana aleasă puteți vedea conversația. Nici adminul nu o poate citi."}),
+      q, box)));
+  setTimeout(() => q.focus(), 30);
 }
 function renderUserPanel(){
   if (!me) return;
@@ -573,15 +616,18 @@ function renderUserPanel(){
     h("button",{type:"button",class:"icon",title:"Setări","aria-label":"Setări",text:"⚙️",onclick:openSettings}));
 }
 function renderChatHeader(){
-  const c = channels.find(x => x.id === curCh);
+  const dm = isDmId(curCh), c = dm ? null : channels.find(x => x.id === curCh), other = dm ? P(dmOther(curCh)) : null;
+  const has = !!(c || other);
   $("chHead").replaceChildren(
-    h("button",{type:"button",class:"icon dc-burger",title:"Canale","aria-label":"Arată canalele",text:"☰",onclick:() => document.querySelector(".dc").classList.toggle("drawer")}),
-    h("span",{class:"ch-ico big",text: c ? (c.emoji || "#") : "#"}),
-    h("b",{text: c ? c.name : "—"}),
-    c && c.topic ? h("span",{class:"ch-topic grow",text:c.topic}) : h("span",{class:"grow"}),
-    c ? h("button",{type:"button",class:"icon",title: settings.muted[c.id] ? "Activează notificările canalului" : "Dezactivează notificările canalului","aria-label":"Mute",text: settings.muted[c.id] ? "🔕" : "🔔",onclick:() => { settings.muted[c.id] = !settings.muted[c.id]; if (!settings.muted[c.id]) delete settings.muted[c.id]; saveSettings(); renderChatHeader(); renderChannels(); renderChatBadge(); }}) : null,
+    h("button",{type:"button",class:"icon dc-burger",title:"Conversații","aria-label":"Arată conversațiile",text:"☰",onclick:() => document.querySelector(".dc").classList.toggle("drawer")}),
+    dm && other ? avatar(dmOther(curCh),"sm") : h("span",{class:"ch-ico big",text: c ? (c.emoji || "#") : "💬"}),
+    h("b",{text: dm ? (other ? other.tag : "?") : c ? c.name : "Mesaje"}),
+    dm ? h("span",{class:"ch-topic grow",text:"🔒 Conversație privată" + (online.has(dmOther(curCh)) ? " · online" : "")}) : c && c.topic ? h("span",{class:"ch-topic grow",text:c.topic}) : h("span",{class:"grow"}),
+    has ? h("button",{type:"button",class:"icon",title: settings.muted[curCh] ? "Activează notificările" : "Dezactivează notificările","aria-label":"Mute",text: settings.muted[curCh] ? "🔕" : "🔔",onclick:() => { settings.muted[curCh] = !settings.muted[curCh]; if (!settings.muted[curCh]) delete settings.muted[curCh]; saveSettings(); renderChatHeader(); renderChannels(); renderChatBadge(); }}) : null,
     h("button",{type:"button",class:"icon dc-memtoggle",title:"Membri","aria-label":"Arată membrii",text:"👥",onclick:() => document.querySelector(".dc").classList.toggle("nomembers")}));
-  $("chatIn").placeholder = c ? "Mesaj #" + c.name : "Alege un canal";
+  $("chatIn").placeholder = dm ? "Mesaj către @" + (other ? other.tag : "") : c ? "Mesaj #" + c.name : "Alege o conversație";
+  $("chatIn").disabled = !has; $("chatBtn").disabled = !has;
+  $("fmtHint").textContent = "**bold** *italic* __subliniat__ ~~tăiat~~ `cod` ||spoiler||" + (dm ? "" : " · @nume") + " · ↑ editează ultimul mesaj";
 }
 
 // ---------- rich text: **bold** *italic* __underline__ ~~strike~~ `code` ||spoiler|| links @mentions ----------
@@ -631,9 +677,15 @@ function renderMsgs(force){
   const box = $("msgs");
   const stick = force || nearBottom(box);
   const list = (chMsgs[curCh] || []).filter(m => profiles[m.uid]);
-  if (!curCh){ box.replaceChildren(h("div",{class:"empty",text:"Niciun canal selectat."})); return; }
-  const c = channels.find(x => x.id === curCh) || {};
-  const out = [h("div",{class:"ch-welcome"}, h("div",{class:"ch-welcome-ico",text:c.emoji || "#"}), h("h3",{text:"Bun venit în #" + (c.name || "")}), h("div",{class:"note",text: c.topic || "Ăsta e începutul canalului."}))];
+  if (!curCh){ box.replaceChildren(h("div",{class:"empty"}, h("div",{style:"font-size:42px",text:"💬"}), h("h3",{text:"Mesaje private"}), h("p",{class:"note",text:"Alege pe cineva din stânga sau apasă 💬 lângă un membru ca să-i scrii. Conversațiile sunt doar între voi doi."}), h("button",{type:"button",class:"primary",text:"Mesaj nou",onclick:dmPicker}))); return; }
+  let out;
+  if (isDmId(curCh)){
+    const oid = dmOther(curCh), op = P(oid) || {};
+    out = [h("div",{class:"ch-welcome"}, h("span",{class:"av lg",style:"border-color:" + accent(op)}, op.avatar ? h("img",{src:op.avatar,alt:"",class:"av-img"}) : (op.emoji || "❔")), h("h3",{text:op.tag || "?"}), h("div",{class:"note",text:"Ăsta e începutul conversației tale private cu " + (op.tag || "?") + ". 🔒 Doar voi doi o puteți vedea."}))];
+  } else {
+    const c = channels.find(x => x.id === curCh) || {};
+    out = [h("div",{class:"ch-welcome"}, h("div",{class:"ch-welcome-ico",text:c.emoji || "#"}), h("h3",{text:"Bun venit în #" + (c.name || "")}), h("div",{class:"note",text: c.topic || "Ăsta e începutul canalului."}))];
+  }
   const lr = lastRead[curCh] || 0; let newLine = false;
   let lastDay = null, last = null;
   for (const m of list){
@@ -648,8 +700,8 @@ function renderMsgs(force){
   if (stick) scrollChat(true);
 }
 function msgEl(m, grouped){
-  const mine = m.uid === uid, canDel = mine || isAdmin;
-  const row = h("div",{class:"msg" + (grouped ? "" : " first") + (isMentioned(m) ? " mentioned" : ""), "data-id":m.id});
+  const mine = m.uid === uid, canDel = mine || (isAdmin && !isDmId(curCh));
+  const row = h("div",{class:"msg" + (grouped ? "" : " first") + (!isDmId(curCh) && isMentioned(m) ? " mentioned" : ""), "data-id":m.id});
   const tools = h("div",{class:"mtools"},
     h("button",{type:"button",title:"Reacționează","aria-label":"Reacționează",text:"😀",onclick:ev => rxPicker(ev.currentTarget, m)}),
     h("button",{type:"button",title:"Răspunde","aria-label":"Răspunde",text:"↩",onclick:() => startReply(m)}),
@@ -725,12 +777,13 @@ function renderMembers(){
   const on = ids.filter(id => online.has(id)), off = ids.filter(id => !online.has(id));
   const row = id => { const p = P(id); return h("div",{class:"mem" + (online.has(id) ? "" : " off"),onclick:() => openProfile(id)}, avatar(id,"sm"),
     h("div",{class:"grow",style:"min-width:0"}, h("div",{class:"mem-n",style:"color:" + accent(p)}, p.tag, p.role === "admin" ? " 👑" : ""), p.status ? h("div",{class:"mem-s",text:p.status}) : null),
-    p.lfg ? h("span",{class:"pill lfg",text:"LFG"}) : null); };
+    id !== uid ? h("button",{type:"button",class:"icon mem-dm",title:"Mesaj privat","aria-label":"Mesaj privat către " + p.tag,text:"💬",onclick:ev => { ev.stopPropagation(); openDm(id); }}) : null); };
   $("memList").replaceChildren(h("div",{class:"h2",text:"Online — " + on.length}), ...on.map(row),
     ...(off.length ? [h("div",{class:"h2",style:"margin-top:14px",text:"Offline — " + off.length})] : []), ...off.map(row));
 }
 function renderTyping(){
   const now = Date.now();
+  if (!curCh || isDmId(curCh)){ $("typing").textContent = ""; return; }
   const names = presence.filter(p => p.id !== uid && p.typing && p.ch === curCh && now - p.seen < TYPING_MS && profiles[p.id]).map(p => P(p.id).tag);
   $("typing").textContent = !names.length ? "" : names.length === 1 ? names[0] + " scrie…" : names.length < 4 ? names.slice(0,-1).join(", ") + " și " + names.slice(-1) + " scriu…" : "Mai mulți oameni scriu…";
 }
@@ -738,7 +791,7 @@ function renderTyping(){
 // ---------- composer: mentions autocomplete, send ----------
 let mentionPop = null, mentionSel = 0, mentionItems = [];
 function updateMentionPop(){
-  const ci = $("chatIn"), before = ci.value.slice(0, ci.selectionStart), m = before.match(/(^|\s)@([^\s@]*)$/);
+  const ci = $("chatIn"), before = ci.value.slice(0, ci.selectionStart), m = isDmId(curCh) ? null : before.match(/(^|\s)@([^\s@]*)$/);
   if (!m){ closeMentionPop(); return; }
   const q = m[2].toLowerCase();
   mentionItems = Object.keys(profiles).filter(id => P(id).tag.toLowerCase().startsWith(q)).sort((a,b) => (online.has(b)-online.has(a)) || P(a).tag.localeCompare(P(b).tag)).slice(0, 7).map(id => ({ id, tag: P(id).tag }));
@@ -761,12 +814,14 @@ function bindChat(){
   const ci = $("chatIn");
   chatAtt = attachBox("chat");
   $("chAdd").onclick = () => channelModal(null);
+  $("dmAdd").onclick = dmPicker;
   ci.addEventListener("input", () => {
     ci.style.height = "auto"; ci.style.height = Math.min(180, ci.scrollHeight) + "px";
     updateMentionPop();
-    if (!typingNow && ci.value.trim()){ typingNow = true; D.setPresence(true, curCh).catch(()=>{}); }
+    if (isDmId(curCh)) return;   // no typing broadcast in private DMs
+    if (!typingNow && ci.value.trim()){ typingNow = true; D.setPresence(true, pubCh()).catch(()=>{}); }
     clearTimeout(typingOff);
-    typingOff = setTimeout(() => { if (typingNow){ typingNow = false; D.setPresence(false, curCh).catch(()=>{}); } }, 4000);
+    typingOff = setTimeout(() => { if (typingNow){ typingNow = false; D.setPresence(false, pubCh()).catch(()=>{}); } }, 4000);
   });
   ci.addEventListener("click", updateMentionPop);
   ci.addEventListener("blur", () => setTimeout(closeMentionPop, 120));
@@ -791,14 +846,14 @@ function bindChat(){
     ev.preventDefault();
     if (sending || !curCh) return;
     const text = ci.value.trim(), att = chatAtt.get(); if (!text && !att) return;
-    const { mentions, everyone } = parseMentions(text);
+    const { mentions, everyone } = isDmId(curCh) ? { mentions: [], everyone: false } : parseMentions(text);
     const extra = {};
     if (mentions.length) extra.mentions = mentions;
     if (everyone) extra.everyone = true;
     if (replyTo) extra.reply = { id: replyTo.id, uid: replyTo.uid, text: (replyTo.text || "").slice(0, 140) };
     sending = true; $("chatBtn").disabled = true;
     ci.value = ""; ci.style.height = "auto"; closeMentionPop();
-    if (typingNow){ typingNow = false; clearTimeout(typingOff); D.setPresence(false, curCh).catch(()=>{}); }
+    if (typingNow){ typingNow = false; clearTimeout(typingOff); D.setPresence(false, pubCh()).catch(()=>{}); }
     try { await D.sendMsg(curCh, text.slice(0,2000), att, extra); chatAtt.clear(); replyTo = null; renderReplyBar(); playSfx("send"); scrollChat(true); }
     catch(e){ ci.value = text; writeErr(e); }
     finally { sending = false; $("chatBtn").disabled = false; }
@@ -862,7 +917,7 @@ function openSettings(){
         toggle("Reduce animațiile", () => settings.reduceMotion, v => settings.reduceMotion = v));
     } else if (tab === "sound"){
       const vol = h("input",{type:"range",min:"0",max:"1",step:"0.05"}); vol.value = settings.volume; vol.oninput = () => { settings.volume = +vol.value; saveSettings(); }; vol.onchange = () => playSfx("test", true);
-      const names = { msg:"Mesaj nou", mention:"Mențiune (@tu)", send:"Trimiți un mesaj", react:"Reacție", join:"Cineva intră online" };
+      const names = { msg:"Mesaj nou", mention:"Mențiune (@tu)", dm:"Mesaj privat", send:"Trimiți un mesaj", react:"Reacție", join:"Cineva intră online" };
       body.replaceChildren(
         toggle("Sunete activate", () => settings.sound, v => { settings.sound = v; renderUserPanel(); }),
         h("div",{class:"h2",style:"margin-top:14px",text:"Volum"}), vol,
@@ -875,9 +930,9 @@ function openSettings(){
           if (v && can && Notification.permission !== "granted"){ const r = await Notification.requestPermission(); if (r !== "granted"){ settings.notify = false; saveSettings(); flash("Browserul a blocat notificările.", true); draw(); return; } }
           settings.notify = v; saveSettings();
         }, can ? "Apar când site-ul e în fundal" : "Browserul tău nu suportă notificări"),
-        toggle("Notifică pentru toate mesajele", () => settings.notifyAll, v => settings.notifyAll = v, "Altfel doar pentru @mențiuni"),
-        h("div",{class:"h2",style:"margin-top:18px",text:"Canale cu sunetul oprit"}),
-        Object.keys(settings.muted).length ? h("div",null, Object.keys(settings.muted).map(id => { const c = channels.find(x => x.id === id); return c ? h("div",{class:"row",style:"margin:6px 0"}, h("span",{class:"grow",text:(c.emoji || "#") + " " + c.name}), h("button",{type:"button",class:"tiny",text:"Pornește",onclick:() => { delete settings.muted[id]; saveSettings(); renderChannels(); renderChatHeader(); draw(); }})) : null; })) : h("div",{class:"note",text:"Niciunul. Apasă 🔔 în capul unui canal ca să-l pui pe mut."}));
+        toggle("Notifică pentru toate mesajele din canale", () => settings.notifyAll, v => settings.notifyAll = v, "Mesajele private și @mențiunile notifică mereu"),
+        h("div",{class:"h2",style:"margin-top:18px",text:"Conversații cu sunetul oprit"}),
+        Object.keys(settings.muted).length ? h("div",null, Object.keys(settings.muted).map(id => { const c = isDmId(id) ? (P(dmOther(id)) ? { emoji:"💬", name: P(dmOther(id)).tag } : null) : channels.find(x => x.id === id); return c ? h("div",{class:"row",style:"margin:6px 0"}, h("span",{class:"grow",text:(c.emoji || "#") + " " + c.name}), h("button",{type:"button",class:"tiny",text:"Pornește",onclick:() => { delete settings.muted[id]; saveSettings(); renderChannels(); renderChatHeader(); draw(); }})) : null; })) : h("div",{class:"note",text:"Niciuna. Apasă 🔔 sus într-o conversație ca s-o pui pe mut."}));
     }
   }
   draw();
@@ -933,7 +988,7 @@ function postCard(post){
   return h("div",{class:"card post"},
     h("div",{class:"row",style:"align-items:flex-start"}, avatar(post.uid),
       h("div",{class:"grow"},
-        h("div",{class:"meta"}, nameEl(post.uid), h("span",{text:(P(post.uid)||{}).platform||""}), h("span",{text:"· " + ago(post.ts)})),
+        h("div",{class:"meta"}, nameEl(post.uid), h("span",{text:ago(post.ts)})),
         post.text ? h("div",{class:"text"}, withMentions(post.text)) : null,
         (post.img || post.gif) ? h("div",{class:"attwrap"}, attEl(post)) : null,
         reacts, replies)));
@@ -941,7 +996,7 @@ function postCard(post){
 function renderFeed(){
   if (!me) return;
   const vis = posts.filter(p => profiles[p.uid]);
-  $("feedList").replaceChildren(...(vis.length ? vis.map(postCard) : [h("div",{class:"empty",text:"Nicio postare încă. Fă tu prima 🎮"})]));
+  $("feedList").replaceChildren(...(vis.length ? vis.map(postCard) : [h("div",{class:"empty",text:"Nicio postare încă. Fă tu prima ✨"})]));
 }
 
 // ---------- squad ----------
@@ -949,38 +1004,34 @@ function renderSquad(){
   if (!me) return;
   const ids = Object.keys(profiles).sort((a,b)=> (online.has(b)-online.has(a)) || P(a).tag.localeCompare(P(b).tag));
   $("squadGrid").replaceChildren(...ids.map(id => {
-    const p = P(id), t = Object.assign(ZERO(), totals[id]||{});
+    const p = P(id);
     return h("div",{class:"pcard",onclick:()=>openProfile(id)},
       h("div",{class:"bn",style:"background:"+bannerOf(p)}),
       h("div",{class:"bd"}, avatar(id),
         h("div",{class:"nm",style:"color:"+accent(p)}, p.tag),
-        h("div",{class:"row",style:"gap:6px;margin-top:4px;flex-wrap:wrap"}, h("span",{class:"pill",text:p.platform}), p.lfg ? h("span",{class:"pill lfg",text:"LFG"}) : null, p.role === "admin" ? h("span",{class:"pill",text:"admin"}) : null, online.has(id) ? h("span",{class:"pill",style:"color:var(--green)",text:"● online"}) : null),
+        h("div",{class:"row",style:"gap:6px;margin-top:4px;flex-wrap:wrap"}, p.pronouns ? h("span",{class:"pill",text:p.pronouns}) : null, p.role === "admin" ? h("span",{class:"pill",text:"admin"}) : null, online.has(id) ? h("span",{class:"pill",style:"color:var(--green)",text:"● online"}) : null),
         h("div",{class:"bio",text:p.bio || p.status || "Fără bio încă."}),
-        h("div",{class:"mini"}, h("span",null,h("b",{text:String(t.wins)})," victorii"), h("span",null,h("b",{text:String(t.kills)})," kill-uri"), h("span",null,h("b",{text:String(t.chests)})," 📦"))));
+        id !== uid ? h("button",{type:"button",class:"tiny",style:"margin-top:10px",text:"💬 Mesaj privat",onclick:ev => { ev.stopPropagation(); openDm(id); }}) : null));
   }));
 }
 
 // ---------- profile modal ----------
 function profileView(id, p, preview){
-  const t = Object.assign(ZERO(), totals[id]||{}), today = Object.assign(ZERO(), (statDay===todayKey() ? dayStats[id] : null) || {});
   const theirPosts = posts.filter(x => x.uid === id).slice(0,3);
   const fact = (k,v) => v ? h("div",{class:"fact"}, h("div",{class:"k",text:k}), h("div",{class:"v",text:v})) : null;
   return [
     h("div",{class:"bn",style:"background:"+bannerOf(p)}),
     h("div",{class:"bd"},
       h("span",{class:"av lg",style:"border-color:var(--panel);box-shadow:0 0 0 3px "+accent(p)}, p.avatar ? h("img",{src:p.avatar,alt:"",class:"av-img"}) : p.emoji, online.has(id) ? h("span",{class:"dot",style:"width:18px;height:18px"}) : null),
-      h("div",{class:"nm"}, h("span",{style:"color:"+accent(p),text:p.tag}), p.pronouns ? h("span",{class:"note",style:"font-size:13px;font-weight:500",text:p.pronouns}) : null, h("span",{class:"pill",text:p.platform}), p.lfg ? h("span",{class:"pill lfg",text:"Caută echipă"}) : null),
+      h("div",{class:"nm"}, h("span",{style:"color:"+accent(p),text:p.tag}), p.pronouns ? h("span",{class:"note",style:"font-size:13px;font-weight:500",text:p.pronouns}) : null, p.role === "admin" ? h("span",{class:"pill",text:"admin"}) : null),
       p.status ? h("div",{class:"note",style:"margin-top:2px",text:"“" + p.status + "”"}) : null,
       p.bio ? h("p",{style:"margin:12px 0 0;white-space:pre-wrap",text:p.bio}) : null,
-      h("div",{class:"facts"}, fact("Modul preferat",p.mode), fact("Aterizează la",p.drop), fact("Loadout principal",p.main), fact("Membru din", p.joined ? new Date(p.joined).toLocaleDateString("ro-RO",{day:"numeric",month:"short",year:"numeric"}) : "")),
-      h("div",{class:"h2",style:"margin-top:18px"},"Total"),
-      h("div",{class:"stats-grid"}, FIELDS.map(([f,l]) => h("div",{class:"stat"}, h("div",{class:"n c-"+f,text:String(t[f])}), h("div",{class:"k",text:l})))),
-      h("div",{class:"note",style:"margin-top:8px"}, "Azi: " + FIELDS.map(([f,l]) => today[f] + " " + l.toLowerCase()).join(" · ")),
+      h("div",{class:"facts"}, fact("Membru din", p.joined ? new Date(p.joined).toLocaleDateString("ro-RO",{day:"numeric",month:"short",year:"numeric"}) : ""), fact("Status", online.has(id) ? "● Online" : "Offline")),
       theirPosts.length ? h("div",{class:"h2",style:"margin-top:18px"},"Postări recente") : null,
       theirPosts.map(x => h("div",{class:"fact",style:"margin-bottom:8px"}, h("div",{class:"k",text:ago(x.ts)}), h("div",{class:"v",style:"font-weight:500;white-space:pre-wrap",text: !x.text ? (x.img ? "🖼️ imagine" : "🎞️ GIF") : x.text.length > 220 ? x.text.slice(0,220)+"…" : x.text}))),
       preview ? null : h("div",{class:"row",style:"margin-top:16px;gap:8px"},
         id === uid ? h("button",{class:"primary",type:"button",text:"Editează profilul",onclick:()=>{ closeProfile(); location.hash = "#me"; }})
-                   : h("button",{class:"primary",type:"button",text:"Dă-i tag în chat",onclick:()=>{ closeProfile(); location.hash = "#chat"; const ci = $("chatIn"); ci.value = "@" + p.tag + " " + ci.value; setTimeout(()=>ci.focus(),60); }})))
+                   : h("button",{class:"primary",type:"button",text:"💬 Trimite mesaj privat",onclick:()=>{ closeProfile(); openDm(id); }})))
   ];
 }
 let openId = null;
@@ -992,57 +1043,11 @@ function openProfile(id){
 }
 function closeProfile(){ openId = null; $("overlay").classList.add("hidden"); }
 
-// ---------- stats ----------
-function openStatDay(k){
-  statDay = k;
-  $("dayLabel").replaceChildren(document.createTextNode(niceDay(k)), h("small",{text:parseDay(k).toLocaleDateString("ro-RO",{day:"numeric",month:"long",year:"numeric"})}));
-  $("nextDay").disabled = k === todayKey();
-  $("dayLbTitle").textContent = "Clasament · " + niceDay(k);
-  if (unsubDay) unsubDay();
-  dayStats = {}; renderStats();
-  unsubDay = D.watchDayStats(k, o => { dayStats = o; renderStats(); });
-}
-let statWriting = false;
-async function bump(field, delta){
-  if (statWriting) return;
-  const cur = Object.assign(ZERO(), dayStats[uid] || {});
-  const next = Math.max(0, cur[field] + delta);
-  if (next === cur[field]) return;
-  const diff = next - cur[field]; cur[field] = next;
-  const tot = Object.assign(ZERO(), totals[uid] || {}); tot[field] = Math.max(0, tot[field] + diff);
-  dayStats[uid] = cur; totals[uid] = tot; renderStats();
-  statWriting = true;
-  try { await D.saveStats(statDay, {wins:cur.wins,kills:cur.kills,chests:cur.chests,matches:cur.matches}, {wins:tot.wins,kills:tot.kills,chests:tot.chests,matches:tot.matches}); }
-  catch(e){ writeErr(e); } finally { statWriting = false; }
-}
-function leaderboard(src){
-  const rows = Object.keys(profiles).map(id => ({id, s:Object.assign(ZERO(), src[id]||{})}))
-    .sort((a,b)=> b.s.wins-a.s.wins || b.s.kills-a.s.kills || b.s.chests-a.s.chests || P(a.id).tag.localeCompare(P(b.id).tag));
-  if (!rows.length) return h("div",{class:"note",text:"Nimeni aici încă."});
-  const medal = i => ["🥇","🥈","🥉"][i] || String(i+1);
-  return h("table",{class:"lb"},
-    h("thead",null,h("tr",null, h("th",{text:"Jucător"}), h("th",{text:"V"}), h("th",{text:"K"}), h("th",{text:"📦"}), h("th",{text:"M"}))),
-    h("tbody",null, rows.map((r,i) => h("tr",{class:r.id===uid?"me":""},
-      h("td",{class:"who",onclick:()=>openProfile(r.id)}, h("span",{style:"width:22px;text-align:center",text: r.s.wins||r.s.kills||r.s.chests ? medal(i) : "·"}), avatar(r.id,"sm"), h("span",{style:"color:"+accent(P(r.id)),text:P(r.id).tag})),
-      h("td",{class:"c-wins",text:String(r.s.wins)}), h("td",{text:String(r.s.kills)}), h("td",{text:String(r.s.chests)}), h("td",{class:"note",text:String(r.s.matches)})))));
-}
-function renderStats(){
-  if (!me) return;
-  const mine = Object.assign(ZERO(), dayStats[uid]||{});
-  $("myStats").replaceChildren(...FIELDS.map(([f,l]) => h("div",{class:"stat"},
-    h("div",{class:"n c-"+f,text:String(mine[f])}), h("div",{class:"k",text:l}),
-    h("div",{class:"ctl"},
-      h("button",{class:"tiny",type:"button","aria-label":"Minus unu la "+l,text:"−",onclick:()=>bump(f,-1)}),
-      h("button",{class:"tiny",type:"button","aria-label":"Plus unu la "+l,text:"+",onclick:()=>bump(f,1)})))));
-  $("dayLb").replaceChildren(leaderboard(dayStats));
-  $("allLb").replaceChildren(leaderboard(totals));
-}
-
 // ---------- my profile ----------
 let draft = null;
 function fillMeForm(){
   if (!me) return;
-  draft = Object.assign({bio:"",color:COLORS[0],banner:"neon",mode:MODES[0],drop:"",main:"",status:"",lfg:false,avatar:"",pronouns:""}, me);
+  draft = Object.assign({bio:"",color:COLORS[0],banner:"neon",status:"",avatar:"",pronouns:""}, me);
   $("mPron").value = draft.pronouns || "";
   $("mPron").oninput = () => { draft.pronouns = $("mPron").value; renderPreview(); };
   const drawAv = () => $("mAvPrev").replaceChildren(draft.avatar ? h("img",{src:draft.avatar,alt:"",class:"av-img"}) : document.createTextNode(draft.emoji || "❔"));
@@ -1055,17 +1060,13 @@ function fillMeForm(){
     try { draft.avatar = await makeAvatar(f); drawAv(); $("mAvRemove").classList.remove("hidden"); renderPreview(); }
     catch(e){ flash(e.message || "Poza nu a putut fi încărcată.", true); }
   };
-  $("mTag").value = draft.tag; $("mBio").value = draft.bio; $("mDrop").value = draft.drop; $("mMain").value = draft.main; $("mStatus").value = draft.status; $("mLfg").checked = !!draft.lfg;
-  fillSelect($("mPlat"), PLATFORMS, draft.platform); fillSelect($("mMode"), MODES, draft.mode);
+  $("mTag").value = draft.tag; $("mBio").value = draft.bio; $("mStatus").value = draft.status;
   emojiPicker($("mEmoji"), () => draft.emoji, e => { draft.emoji = e; renderPreview(); });
   const sw = $("mColor");
   sw.replaceChildren(...COLORS.map(c => h("button",{type:"button","aria-label":"Color "+c,class:c===draft.color?"on":"",style:"background:"+c,onclick:()=>{ draft.color = c; for (const b of sw.children) b.classList.toggle("on", b.getAttribute("aria-label")==="Color "+c); renderPreview(); }})));
   const bn = $("mBanner");
   bn.replaceChildren(...Object.keys(BANNERS).map(k => h("button",{type:"button",title:k,"aria-label":"Banner "+k,class:k===draft.banner?"on":"",style:"background:"+BANNERS[k],onclick:()=>{ draft.banner = k; for (const b of bn.children) b.classList.toggle("on", b.title===k); renderPreview(); }})));
-  for (const [id,f] of [["mTag","tag"],["mBio","bio"],["mDrop","drop"],["mMain","main"],["mStatus","status"]]) $(id).oninput = () => { draft[f] = $(id).value; renderPreview(); };
-  $("mPlat").onchange = () => { draft.platform = $("mPlat").value; renderPreview(); };
-  $("mMode").onchange = () => { draft.mode = $("mMode").value; renderPreview(); };
-  $("mLfg").onchange = () => { draft.lfg = $("mLfg").checked; renderPreview(); };
+  for (const [id,f] of [["mTag","tag"],["mBio","bio"],["mStatus","status"]]) $(id).oninput = () => { draft[f] = $(id).value; renderPreview(); };
   $("meMsg").textContent = "";
   renderPreview(); renderKeys();
 }
@@ -1086,11 +1087,11 @@ function renderPreview(){
 async function saveMe(ev){
   ev.preventDefault(); if (!draft) return;
   const tag = draft.tag.trim();
-  if (!tag){ $("meMsg").textContent = "Gamertag-ul nu poate fi gol."; return; }
-  if (Object.entries(profiles).some(([id,p]) => id !== uid && p.tag.toLowerCase() === tag.toLowerCase())){ $("meMsg").textContent = "Cineva are deja gamertag-ul ăsta."; return; }
+  if (!tag){ $("meMsg").textContent = "Numele nu poate fi gol."; return; }
+  if (Object.entries(profiles).some(([id,p]) => id !== uid && p.tag.toLowerCase() === tag.toLowerCase())){ $("meMsg").textContent = "Cineva are deja numele ăsta."; return; }
   const btn = $("meSave"); btn.disabled = true; $("meMsg").textContent = "Se salvează…";
   try {
-    await D.saveProfile({ avatar: draft.avatar || "", pronouns: (draft.pronouns || "").trim().slice(0,20), tag: tag.slice(0,24), emoji: EMOJIS.includes(draft.emoji) ? draft.emoji : me.emoji, platform: draft.platform, bio: draft.bio.slice(0,200), color: draft.color, banner: draft.banner, mode: draft.mode, drop: draft.drop.slice(0,40), main: draft.main.slice(0,40), status: draft.status.slice(0,60), lfg: !!draft.lfg });
+    await D.saveProfile({ avatar: draft.avatar || "", pronouns: (draft.pronouns || "").trim().slice(0,20), tag: tag.slice(0,24), emoji: EMOJIS.includes(draft.emoji) || draft.emoji === me.emoji ? draft.emoji : me.emoji, bio: draft.bio.slice(0,200), color: draft.color, banner: draft.banner, status: draft.status.slice(0,60) });
     $("meMsg").textContent = "Salvat ✓";
   } catch(e){ $("meMsg").textContent = ""; writeErr(e); }
   finally { btn.disabled = false; }
@@ -1101,6 +1102,8 @@ const keyLabel = l => String(l || "Cheie").replace("Owner key","Cheia ta 👑").
 function renderKeys(){
   if (!isAdmin) return;
   const sorted = keys.slice().sort((a,b) => (b.admin - a.admin) || String(a.label).localeCompare(String(b.label), undefined, {numeric:true}));
+  const used = keys.filter(k => k.claimedBy).length;
+  $("keysCount").textContent = keys.length + " chei · " + used + " folosite · " + (keys.length - used) + " libere";
   $("keysList").replaceChildren(...sorted.map(k => {
     const who = k.claimedBy && profiles[k.claimedBy] ? k.claimedBy : null;
     return h("div",{class:"line"},
