@@ -28,6 +28,8 @@ jobs:
           node-version: 22
       - name: Create the R2 bucket (first time only)
         run: npx --yes wrangler@4 r2 bucket create folkchat-media || echo "bucket already exists"
+      - name: Auto-delete videos after 3 days (keeps storage inside the free 10 GB)
+        run: npx --yes wrangler@4 r2 bucket lifecycle add folkchat-media delete-old-videos v- --expire-days 3 --force || echo "lifecycle rule not added (already there?)"
       - name: Deploy worker
         run: npx --yes wrangler@4 deploy
       - name: Set push-notification secrets
