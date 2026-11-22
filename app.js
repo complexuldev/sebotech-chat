@@ -1,5 +1,5 @@
 // FolkChat – app UI. All user text is rendered with textContent (no HTML injection).
-import * as D from "./data.js?v=16";
+import * as D from "./data.js?v=17";
 import { OWNER_EMAIL, KLIPY_KEY, MEDIA_URL, VAPID_KEY } from "./config.js?v=12";
 
 const EMOJIS = ["😎","🐱","🎯","🔥","💀","👑","🐺","🦖","🤖","👻","🍌","⚡","🦈","🐉","🎮","🧊","🥷","👽"];
@@ -173,6 +173,7 @@ $("gateForm").addEventListener("submit", async ev => {
 // ---------- app ----------
 function startApp(){
   if (started) return; started = true;
+  if ("serviceWorker" in navigator && !D.isNative) navigator.serviceWorker.register("sw.js").catch(() => {});
   D.hubStart();
   showScreen("loading");
   const bootTimer = setTimeout(() => { $("loadingMsg").textContent = "Încă mă conectez… verifică internetul."; }, 10000);
@@ -2801,7 +2802,8 @@ function initCalls(){
   unsubs.push(D.watchIncomingCalls(list => {
     const now = Date.now();
     const ringing = list.find(c => c.state === "ringing" && c.caller !== uid && profiles[c.caller] && now - c.ts < 45000 && c.id !== call.pair);
-    if (ringing && (!incoming || incoming.id !== ringing.id)) showIncoming(ringing);
+    if (ringing && (!incoming || incoming.id !== ringing.id)){ showIncoming(ringing); if (!document.hidden) cancelNativeRing(); }
+    tryPendingAnswer();
     if (!ringing && incoming) hideIncoming();
   }));
 }
@@ -2821,7 +2823,23 @@ function showIncoming(c){
   }
   clearTimeout(showIncoming.t); showIncoming.t = setTimeout(() => { if (incoming && incoming.id === c.id) hideIncoming(); }, 32000);
 }
-function hideIncoming(){ incoming = null; stopRing(); const el = $("incomingCall"); if (el) el.remove(); }
+function hideIncoming(){ incoming = null; stopRing(); cancelNativeRing(); const el = $("incomingCall"); if (el) el.remove(); }
+// ---- Android: full-screen incoming call (the app rings like a phone; "Răspunde" opens FolkChat and answers) ----
+let pendingAnswer = null, pendingAnswerT = 0;
+function cancelNativeRing(){ const FC = D.plugin("FolkCall"); if (FC) Promise.resolve().then(() => FC.cancelRing()).catch(() => {}); }
+async function nativeCallAction(){
+  const FC = D.plugin("FolkCall"); if (!FC || !FC.takeAction) return;
+  let r; try { r = await FC.takeAction(); } catch(e){ return; }
+  if (!r || !r.action) return;
+  if (r.action === "answer" && r.cid){ pendingAnswer = r.cid; pendingAnswerT = Date.now(); tryPendingAnswer(); }
+}
+function tryPendingAnswer(){
+  if (!pendingAnswer) return;
+  if (Date.now() - pendingAnswerT > 45000){ pendingAnswer = null; return; }
+  if (incoming && incoming.id === pendingAnswer){ const c = incoming; pendingAnswer = null; answer(c); }
+}
+window.addEventListener("folkcall", nativeCallAction);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) nativeCallAction(); });
 async function answer(c){
   hideIncoming();
   if (call.pair) hangUp(true);
@@ -3037,13 +3055,18 @@ async function initPush(){
       let st = await PN.checkPermissions();
       if (st.receive === "prompt" || st.receive === "prompt-with-rationale") st = await PN.requestPermissions();
       if (st.receive !== "granted") return;
-      await PN.addListener("registration", t => D.saveDeviceToken(t.value).catch(() => {}));
+      // new Android app (it has the ringing screen): calls arrive as data messages and ring full-screen like a phone call.
+      // Probe with a harmless call: on older apps the method doesn't exist and the promise rejects.
+      const FC = D.plugin("FolkCall");
+      const c2 = FC ? await Promise.resolve().then(() => FC.cancelRing()).then(() => true, () => false) : false;
+      await PN.addListener("registration", t => D.saveDeviceToken((c2 ? "c2:" : "") + t.value).catch(() => {}));
       await PN.addListener("pushNotificationActionPerformed", a => {
         const d = (a && a.notification && a.notification.data) || {};
         if (d.cid){ location.hash = "#chat"; selectChannel(d.type === "mention" ? d.cid : "dm:" + d.cid); }
       });
       await PN.register();
     } catch(e){}
+    nativeCallAction();
     return;
   }
   maybeWebPush();
