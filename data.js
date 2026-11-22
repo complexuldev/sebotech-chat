@@ -280,9 +280,32 @@ export function setPresence(online, voice, act){
   return setDoc(doc(db, "presence", uid), d);
 }
 // ---------- hours played (one small doc per member: playtime/{uid}.g.<game> = { n, sec, last }) ----------
+// Weeks start on Monday (local time). Key looks like "2026-W47".
+export function weekId(t){
+  const d = new Date(t || Date.now()); d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));            // Thursday of this week decides the ISO year
+  const y = d.getFullYear(), jan4 = new Date(y, 0, 4);
+  const w = 1 + Math.round(((d - jan4) / 86400000 - 3 + ((jan4.getDay() + 6) % 7)) / 7);
+  return y + "-W" + String(w).padStart(2, "0");
+}
 export function addPlaytime(key, name, sec){
-  sec = Math.round(sec); if (!key || sec <= 0) return Promise.resolve();
-  return setDoc(doc(db, "playtime", uid), { g: { [key]: { n: String(name).slice(0, 48), sec: increment(Math.min(sec, 900)), last: Date.now() } } }, { merge: true });
+  sec = Math.round(Math.min(sec, 900)); if (!key || sec <= 0) return Promise.resolve();
+  const wk = weekId();
+  return setDoc(doc(db, "playtime", uid), {
+    g: { [key]: { n: String(name).slice(0, 48), sec: increment(sec), last: Date.now() } },
+    wk: { [wk]: increment(sec) },
+    wkg: { [wk]: { [key]: increment(sec) } }
+  }, { merge: true });
+}
+export async function getAllPlaytime(){ const s = await getDocs(collection(db, "playtime")); return rows(s); }
+// keep only the last 6 weeks of weekly totals so the doc stays small
+export async function prunePlaytime(){
+  const s = await getDoc(doc(db, "playtime", uid)); if (!s.exists()) return;
+  const keep = new Set(); for (let i = 0; i < 6; i++) keep.add(weekId(Date.now() - i * 7 * 86400000));
+  const upd = {}, d = s.data();
+  for (const w of Object.keys(d.wk || {})) if (!keep.has(w)) upd["wk." + w] = deleteField();
+  for (const w of Object.keys(d.wkg || {})) if (!keep.has(w)) upd["wkg." + w] = deleteField();
+  if (Object.keys(upd).length) await updateDoc(doc(db, "playtime", uid), upd);
 }
 export async function getPlaytime(id){ const s = await getDoc(doc(db, "playtime", id)); return s.exists() ? (s.data().g || {}) : {}; }
 
