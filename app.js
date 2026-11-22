@@ -2321,14 +2321,56 @@ async function startShare(){
   }
   const vt = s.getVideoTracks()[0];
   if (vt){ try { vt.contentHint = SHARE_Q[q].fps >= 60 ? "motion" : "detail"; } catch(e){} vt.addEventListener("ended", () => { if (share.stream === s) stopShare(); }); }
+  // Sound: Windows "system audio" also contains the call, so friends would hear themselves.
+  //  - Windows app: replace it with the app's own capture of everything EXCEPT FolkChat (like Discord);
+  //  - browser: keep it only if the browser confirms it filtered out its own sound; tab audio is always fine.
+  let sa = s.getAudioTracks()[0];
+  if (sa && nativeWin){
+    const nat = await nativeShareAudio();
+    if (nat){ s.removeTrack(sa); sa.stop(); s.addTrack(nat); sa = null; }
+  }
+  if (sa){
+    const surf = vt && vt.getSettings ? vt.getSettings().displaySurface : "";
+    const own = sa.getSettings ? sa.getSettings().restrictOwnAudio : undefined;
+    if (surf !== "browser" && own !== true){
+      s.removeTrack(sa); sa.stop();
+      flash("🔇 Sunetul ecranului e oprit: ar fi trimis și vocile din apel (v-ați fi auzit singuri). Pentru sunet, partajează din aplicația FolkChat de Windows sau alege un tab.", true);
+    }
+  }
   share.stream = s; share.q = q;
   for (const pc of sharePCs()){ shareAttach(pc); dcSend(pc, { t: "share", on: true, q }); }
   renderVoice(); if (call.pair) callUI();
   flash("🖥️ Partajezi ecranul" + (s.getAudioTracks().length ? " cu sunet." : ". (Fără sunet: bifează „Partajează sunetul” data viitoare.)"));
 }
+async function nativeShareAudio(){
+  let ctx = null;
+  try {
+    ctx = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
+    await ctx.audioWorklet.addModule("./sys-audio-worklet.js?v=1");
+    const node = new AudioWorkletNode(ctx, "folk-sys", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+    const dst = ctx.createMediaStreamDestination(); dst.channelCount = 2; node.connect(dst);
+    const ch = new TAURI.core.Channel();
+    ch.onmessage = m => {
+      let ab = null;
+      if (m instanceof ArrayBuffer) ab = m;
+      else if (ArrayBuffer.isView(m)) ab = new Uint8Array(m.buffer, m.byteOffset, m.byteLength).slice().buffer;
+      else if (Array.isArray(m)) ab = Uint8Array.from(m).buffer;
+      if (ab) node.port.postMessage(ab, [ab]);
+    };
+    await TAURI.core.invoke("sys_audio_start", { onData: ch });
+    if (ctx.state === "suspended") await ctx.resume();
+    share.native = { ctx, node };
+    return dst.stream.getAudioTracks()[0];
+  } catch(e){
+    console.warn("native share audio", e);
+    if (ctx) try { ctx.close(); } catch(x){}
+    return null;
+  }
+}
 function stopShare(){
   if (!share.stream) return;
   const s = share.stream; share.stream = null;
+  if (share.native){ tInvoke("sys_audio_stop"); try { share.native.ctx.close(); } catch(e){} share.native = null; }
   for (const pc of sharePCs()){ shareAttach(pc); dcSend(pc, { t: "share", on: false }); }
   s.getTracks().forEach(t => t.stop());
   if (stageFor === uid) closeStage();
