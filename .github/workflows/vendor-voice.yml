@@ -1,0 +1,36 @@
+name: Vendor voice AI models
+# Copies the noise-removal models (RNNoise + GTCRN, MIT/Apache) from npm into vendor/wns/,
+# checks every file against a pinned SHA-256, then commits them so GitHub Pages serves them.
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/vendor-voice.yml"]
+permissions:
+  contents: write
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch @sapphi-red/web-noise-suppressor@0.4.1
+        run: |
+          mkdir -p /tmp/p && cd /tmp/p && npm pack @sapphi-red/web-noise-suppressor@0.4.1 && tar xzf *.tgz
+          cd package/dist
+          cat > /tmp/sums <<'SUMS'
+          1e06facbb3d7459b89769aa4247cd4b71263e6662e4da0c54763f3bf06f5893b  rnnoise/workletProcessor.js
+          343322257ef82a421ab9dd795b4afe18c1aa5b48a0ff65bc040a308c78893da8  gtcrn/workletProcessor.js
+          8b60a2ab88fdae2d1a9f940249d0eb072f28ba8e796f7304347b4e07839c8853  rnnoise.wasm
+          378fd17c294db15ee4e818ba5ef072242a21c8ad7445b483f7f46d7dc4f2c253  rnnoise_simd.wasm
+          01a5286ddaa1ce6d0dd5510bd9241f3bf0cc727a05d5767ae6881d85d9983719  gtcrn.wasm
+          SUMS
+          sed -i 's/^ *//' /tmp/sums && sha256sum -c /tmp/sums
+          D="$GITHUB_WORKSPACE/vendor/wns"; mkdir -p "$D/rnnoise" "$D/gtcrn"
+          cp rnnoise.wasm rnnoise_simd.wasm gtcrn.wasm "$D/"
+          cp rnnoise/workletProcessor.js "$D/rnnoise/"; cp gtcrn/workletProcessor.js "$D/gtcrn/"
+          cp ../LICENSE "$D/LICENSE"
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vendor/wns
+          git diff --cached --quiet && echo "nothing new" || git commit -m "Vendor voice AI noise-removal models" && git push
