@@ -1,0 +1,23 @@
+{
+  "name": "folkchat-mobile",
+  "private": true,
+  "version": "1.0.0",
+  "description": "FolkChat Android app (Capacitor wrapper around the live site)",
+  "scripts": {
+    "android:add": "cap add android",
+    "android:patch": "node scripts/patch-android.mjs",
+    "android:sync": "cap sync android",
+    "assets": "capacitor-assets generate --android --iconBackgroundColor '#101016' --splashBackgroundColor '#0b0b0f'"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/push-notifications": "^8.1.0",
+    "@capacitor-firebase/authentication": "^8.6.0",
+    "firebase": "^12.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^4.0.0",
+    "@capacitor/cli": "^8.6.0"
+  }
+}

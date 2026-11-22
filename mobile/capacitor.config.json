@@ -1,0 +1,35 @@
+{
+  "appId": "com.folkchat.app",
+  "appName": "FolkChat",
+  "webDir": "www",
+  "server": {
+    "url": "https://complexuldev.github.io/sebotech-chat/",
+    "androidScheme": "https",
+    "cleartext": false,
+    "allowNavigation": [
+      "complexuldev.github.io",
+      "sebotech-chat.firebaseapp.com",
+      "*.googleapis.com",
+      "*.gstatic.com",
+      "*.klipy.com",
+      "*.workers.dev"
+    ]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0b0b0f"
+  },
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": true,
+      "providers": ["google.com"]
+    },
+    "PushNotifications": {
+      "presentationOptions": []
+    },
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "DARK"
+    }
+  }
+}
