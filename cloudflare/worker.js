@@ -32,6 +32,12 @@ export default {
     const cors = corsHeaders(origin, env);
     if (req.method === "OPTIONS") return new Response(null, { status: cors ? 204 : 403, headers: cors || {} });
     try {
+      // flood guard: one address can't hammer the server (stops before any storage or database work)
+      if (env.IP_LIMIT){
+        const ip = req.headers.get("CF-Connecting-IP") || "?";
+        const { success } = await env.IP_LIMIT.limit({ key: "ip:" + ip });
+        if (!success) return new Response("slow down", { status: 429, headers: Object.assign({ "Retry-After": "60" }, cors || {}) });
+      }
       if (req.method === "GET" && url.pathname.startsWith("/m/")) return await serve(req, env, ctx, url);
       if (url.pathname === "/" || url.pathname === "/health") return json({ ok: true, service: "folkchat-media" }, 200, cors);
       // everything below changes something: browser calls must come from an allowed origin
