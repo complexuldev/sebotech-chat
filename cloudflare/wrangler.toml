@@ -24,6 +24,15 @@ class_name = "Hub"
 tag = "v1"
 new_sqlite_classes = ["Hub"]
 
+# Per-address flood guard: at most 300 requests a minute from one internet address (normal use is far below;
+# opening a chat full of pictures is ~50). Extra requests get "429 slow down" before touching storage.
+[[ratelimits]]
+name = "IP_LIMIT"
+namespace_id = "1103"
+  [ratelimits.simple]
+  limit = 300
+  period = 60
+
 # Per-user rate limits (requests per 60 seconds, per Cloudflare location)
 [[ratelimits]]
 name = "UPLOAD_LIMIT"
